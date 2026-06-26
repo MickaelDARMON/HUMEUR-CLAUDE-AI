@@ -8,146 +8,370 @@
 <meta name="apple-mobile-web-app-title" content="Journal HSCM"/>
 <meta name="theme-color" content="#0a0a1a"/>
 <title>Journal HSCM</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:#0a0a1a;font-family:'Inter',system-ui,sans-serif;color:#e2e8f0}
-#root{max-width:480px;margin:0 auto;min-height:100vh}
-input,textarea,button{font-family:'Inter',system-ui,sans-serif}
+body{background:#0a0a1a;font-family:system-ui,-apple-system,sans-serif;color:#e2e8f0;min-height:100vh}
+#app{max-width:480px;margin:0 auto;padding:16px;min-height:100vh}
+button,input,textarea{font-family:inherit}
+.card{background:#1a1a2e;border:1px solid #2d2d4e;border-radius:14px;padding:16px;margin-bottom:12px}
+.lbl{font-size:11px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.btn-analyze{width:100%;padding:18px;background:linear-gradient(135deg,#7c3aed,#a78bfa);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;cursor:pointer;margin-top:4px}
+.btn-confirm{width:100%;padding:18px;background:linear-gradient(135deg,#059669,#34d399);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;cursor:pointer}
+.btn-sleep{width:100%;padding:16px;border-radius:12px;margin-bottom:8px;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:space-between;border:2px solid}
+.btn-med{flex:1;padding:14px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;border:2px solid}
+.btn-sos{flex:1;padding:10px;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:2px solid}
+.btn-score{padding:10px 6px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;border:2px solid}
+textarea{width:100%;min-height:130px;background:#0f0f1a;border:1px solid #3d3d6b;border-radius:10px;color:#e2e8f0;padding:12px;font-size:14px;resize:vertical;outline:none;line-height:1.7}
+input[type=number]{width:100%;background:#0f0f1a;border:1px solid #3d3d6b;border-radius:8px;color:#e2e8f0;padding:12px;font-size:18px;outline:none}
+.spinner{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:16px;color:#a78bfa}
+.spin{font-size:44px;animation:spin 1s linear infinite}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.hidden{display:none}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="app"></div>
 <script>
-const GOOGLE_CLIENT_ID = '757607436733-5cv7pbhmdo11ojl3310n62jejfloul4o.apps.googleusercontent.com'
-const CALENDAR_ID = 'mickael.darmon.consulting@gmail.com'
-const EMAIL_TO = ['mehdbou@yahoo.fr','flomathoret@gmail.com']
-const LEGAL = "⚠️ L'évaluation du score HSCM est réalisée par intelligence artificielle (Claude, Anthropic) sur la base du protocole HSCM, à partir du commentaire libre du patient. Cette analyse est indicative et ne constitue pas un diagnostic médical. Elle est soumise à la validation du Dr Boudjemaa et de Mme Mathotret."
+const CLIENT_ID='757607436733-5cv7pbhmdo11ojl3310n62jejfloul4o.apps.googleusercontent.com'
+const CAL_ID='mickael.darmon.consulting@gmail.com'
+const EMAILS=['mehdbou@yahoo.fr','flomathoret@gmail.com']
+const LEGAL="⚠️ L'évaluation du score HSCM est réalisée par intelligence artificielle (Claude, Anthropic) sur la base du protocole HSCM, à partir du commentaire libre du patient. Cette analyse est indicative et ne constitue pas un diagnostic médical. Elle est soumise à la validation du Dr Boudjemaa et de Mme Mathotret."
 
-const scoreColor=s=>{if(s>=3)return'#ef4444';if(s===2)return'#f97316';if(s===1)return'#facc15';if(s===0)return'#22c55e';if(s>=-2)return'#60a5fa';return'#3730a3'}
-const scoreLabel=s=>({4:'Manie sévère',3:'Manie',2:'Hypomanie +2',1:'Hypomanie +1',0:'Normal','-1':'Dépression légère','-2':'Dépression légère-mod.','-3':'Dépression modérée','-4':'Dépression sévère'}[String(s)]??'—')
-const calColorId=s=>{if(s>=3)return'11';if(s===2)return'6';if(s===1)return'5';if(s===0)return'10';if(s>=-2)return'9';return'1'}
-const fmt=m=>{if(!m||m<=0)return null;const h=Math.floor(m/60),mn=Math.round(m%60);return`${h}h${mn>0?String(mn).padStart(2,'0'):''}`}
-const fmtTime=d=>{if(!d)return'—';return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
-const diff=(s,e)=>{if(!s||!e)return 0;let d=(e-s)/60000;if(d<0)d+=1440;return Math.max(0,d)}
+// ── HELPERS ─────────────────────────────────────────────────────
+const sc=s=>{if(s>=3)return'#ef4444';if(s===2)return'#f97316';if(s===1)return'#facc15';if(s===0)return'#22c55e';if(s>=-2)return'#60a5fa';return'#3730a3'}
+const sl=s=>({4:'Manie sévère',3:'Manie',2:'Hypomanie +2',1:'Hypomanie +1',0:'Normal','-1':'Dép. légère','-2':'Dép. légère-mod.','-3':'Dép. modérée','-4':'Dép. sévère'}[String(s)]??'—')
+const calCol=s=>{if(s>=3)return'11';if(s===2)return'6';if(s===1)return'5';if(s===0)return'10';if(s>=-2)return'9';return'1'}
+const fmtM=m=>{if(!m||m<=0)return null;const h=Math.floor(m/60),mn=Math.round(m%60);return`${h}h${mn>0?String(mn).padStart(2,'0'):''}`}
+const fmtT=d=>{if(!d)return'—';return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
+const dif=(a,b)=>{if(!a||!b)return 0;let d=(b-a)/60000;if(d<0)d+=1440;return Math.max(0,d)}
+const qs=s=>document.querySelector(s)
+const el=(t,a={},ch=[])=>{const e=document.createElement(t);Object.entries(a).forEach(([k,v])=>{if(k==='style'&&typeof v==='object')Object.assign(e.style,v);else if(k.startsWith('on'))e.addEventListener(k.slice(2).toLowerCase(),v);else e[k]=v});ch.forEach(c=>c&&e.appendChild(typeof c==='string'?document.createTextNode(c):c));return e}
 
-const {useState,useEffect}=React
-const {BarChart,Bar,LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,ReferenceLine,Cell,ResponsiveContainer}=Recharts
+// ── STATE ────────────────────────────────────────────────────────
+let token=null,authReady=false
+let cycles=[{bed:null,sleep:null,wake:null}],phase='bed'
+let med=null,medSOS=null,comment='',weight='',listening=false
+let analysis=null,score=null,chartData=[],saveStatus=''
+let step='login' // login|form|analyzing|result|saving|done
 
-function useAuth(){
-  const[token,setToken]=useState(null)
-  const[ready,setReady]=useState(false)
-  useEffect(()=>{const t=setInterval(()=>{if(window.google?.accounts?.oauth2){setReady(true);clearInterval(t)}},300);return()=>clearInterval(t)},[])
-  const signIn=()=>{if(!ready)return;window.google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.compose',callback:r=>{if(r.access_token)setToken(r.access_token)}}).requestAccessToken()}
-  const signOut=()=>{if(token)window.google?.accounts?.oauth2?.revoke(token,()=>{});setToken(null)}
-  return{token,ready,signIn,signOut,ok:!!token}
+// ── AUTH ─────────────────────────────────────────────────────────
+const checkAuth=setInterval(()=>{if(window.google?.accounts?.oauth2){authReady=true;clearInterval(checkAuth);render()}},300)
+
+function signIn(){
+  if(!authReady)return
+  window.google.accounts.oauth2.initTokenClient({
+    client_id:CLIENT_ID,
+    scope:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.compose',
+    callback:r=>{if(r.access_token){token=r.access_token;step='form';loadChart();render()}}
+  }).requestAccessToken()
 }
 
-function useSleep(){
-  const[cycles,setCycles]=useState([{bed:null,sleep:null,wake:null}])
-  const[phase,setPhase]=useState('bed')
-  const now=()=>new Date()
-  const handleBed=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],bed:n};return u});setPhase('sleep')}
-  const handleSleep=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],sleep:n};return u});setPhase('wake')}
-  const handleWake=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],wake:n};return[...u,{bed:n,sleep:null,wake:null}]});setPhase('sleep')}
-  const handleFinalWake=()=>{const n=now();setCycles(p=>{const u=[...p];const l=u.length-1;if(!u[l].sleep){u.pop();u[u.length-1]={...u[u.length-1],wake:n}}else{u[l]={...u[l],wake:n}};return u});setPhase('done')}
+function signOut(){if(token)window.google?.accounts?.oauth2?.revoke(token,()=>{});token=null;step='login';render()}
+
+// ── SLEEP ────────────────────────────────────────────────────────
+function handleBed(){const n=new Date();cycles[cycles.length-1].bed=n;phase='sleep';render()}
+function handleSleep(){const n=new Date();cycles[cycles.length-1].sleep=n;phase='wake';render()}
+function handleWake(){const n=new Date();cycles[cycles.length-1].wake=n;cycles.push({bed:n,sleep:null,wake:null});phase='sleep';render()}
+function handleFinalWake(){
+  const n=new Date(),l=cycles.length-1
+  if(!cycles[l].sleep){cycles.pop();cycles[cycles.length-1].wake=n}else{cycles[l].wake=n}
+  phase='done';render()
+}
+function resetSleep(){cycles=[{bed:null,sleep:null,wake:null}];phase='bed';render()}
+
+function getSleepSummary(){
   const done=cycles.filter(c=>c.sleep&&c.wake)
-  const totalSleep=done.reduce((a,c)=>a+diff(c.sleep,c.wake),0)
+  const totalSleep=done.reduce((a,c)=>a+dif(c.sleep,c.wake),0)
   const firstBed=cycles[0]?.bed
   const lastWake=cycles.filter(c=>c.wake).slice(-1)[0]?.wake
-  const totalBed=firstBed&&lastWake?diff(firstBed,lastWake):0
-  const summary={bedtime:fmtTime(firstBed),wakeup:fmtTime(lastWake),totalSleep:fmt(totalSleep),totalBed:fmt(totalBed),cycleCount:done.length,cycles:done.map((c,i)=>({label:`Cycle ${i+1}`,sleep:fmtTime(c.sleep),wake:fmtTime(c.wake),dur:fmt(diff(c.sleep,c.wake))}))}
-  const reset=()=>{setCycles([{bed:null,sleep:null,wake:null}]);setPhase('bed')}
-  return{phase,summary,firstBed,lastWake,handleBed,handleSleep,handleWake,handleFinalWake,reset}
+  return{
+    bedtime:fmtT(firstBed),wakeup:fmtT(lastWake),
+    totalSleep:fmtM(totalSleep),totalBed:fmtM(firstBed&&lastWake?dif(firstBed,lastWake):0),
+    cycleCount:done.length,
+    cycles:done.map((c,i)=>({label:`Cycle ${i+1}`,s:fmtT(c.sleep),w:fmtT(c.wake),d:fmtM(dif(c.sleep,c.wake))}))
+  }
 }
 
-async function fetchChart(token){
-  const now=new Date(),from=new Date(now);from.setDate(from.getDate()-7)
-  const p=new URLSearchParams({timeMin:from.toISOString(),timeMax:now.toISOString(),q:'Humeur',singleEvents:'true',orderBy:'startTime',maxResults:'20'})
-  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${p}`,{headers:{Authorization:`Bearer ${token}`}})
-  const d=await r.json()
-  if(!d.items)return[]
-  return d.items.map(ev=>{
-    const desc=ev.description||''
-    const sc=desc.match(/HSCM\s*<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Journal HSCM"/>
-<meta name="theme-color" content="#0a0a1a"/>
-<title>Journal HSCM</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:#0a0a1a;font-family:'Inter',system-ui,sans-serif;color:#e2e8f0}
-#root{max-width:480px;margin:0 auto;min-height:100vh}
-input,textarea,button{font-family:'Inter',system-ui,sans-serif}
-@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script>
-const GOOGLE_CLIENT_ID = '757607436733-5cv7pbhmdo11ojl3310n62jejfloul4o.apps.googleusercontent.com'
-const CALENDAR_ID = 'mickael.darmon.consulting@gmail.com'
-const EMAIL_TO = ['mehdbou@yahoo.fr','flomathoret@gmail.com']
-const LEGAL = "⚠️ L'évaluation du score HSCM est réalisée par intelligence artificielle (Claude, Anthropic) sur la base du protocole HSCM, à partir du commentaire libre du patient. Cette analyse est indicative et ne constitue pas un diagnostic médical. Elle est soumise à la validation du Dr Boudjemaa et de Mme Mathotret."
-
-const scoreColor=s=>{if(s>=3)return'#ef4444';if(s===2)return'#f97316';if(s===1)return'#facc15';if(s===0)return'#22c55e';if(s>=-2)return'#60a5fa';return'#3730a3'}
-const scoreLabel=s=>({4:'Manie sévère',3:'Manie',2:'Hypomanie +2',1:'Hypomanie +1',0:'Normal','-1':'Dépression légère','-2':'Dépression légère-mod.','-3':'Dépression modérée','-4':'Dépression sévère'}[String(s)]??'—')
-const calColorId=s=>{if(s>=3)return'11';if(s===2)return'6';if(s===1)return'5';if(s===0)return'10';if(s>=-2)return'9';return'1'}
-const fmt=m=>{if(!m||m<=0)return null;const h=Math.floor(m/60),mn=Math.round(m%60);return`${h}h${mn>0?String(mn).padStart(2,'0'):''}`}
-const fmtTime=d=>{if(!d)return'—';return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
-const diff=(s,e)=>{if(!s||!e)return 0;let d=(e-s)/60000;if(d<0)d+=1440;return Math.max(0,d)}
-
-const {useState,useEffect}=React
-const {BarChart,Bar,LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,ReferenceLine,Cell,ResponsiveContainer}=Recharts
-
-function useAuth(){
-  const[token,setToken]=useState(null)
-  const[ready,setReady]=useState(false)
-  useEffect(()=>{const t=setInterval(()=>{if(window.google?.accounts?.oauth2){setReady(true);clearInterval(t)}},300);return()=>clearInterval(t)},[])
-  const signIn=()=>{if(!ready)return;window.google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.compose',callback:r=>{if(r.access_token)setToken(r.access_token)}}).requestAccessToken()}
-  const signOut=()=>{if(token)window.google?.accounts?.oauth2?.revoke(token,()=>{});setToken(null)}
-  return{token,ready,signIn,signOut,ok:!!token}
+// ── CALENDAR ─────────────────────────────────────────────────────
+async function loadChart(){
+  try{
+    const now=new Date(),from=new Date(now);from.setDate(from.getDate()-7)
+    const p=new URLSearchParams({timeMin:from.toISOString(),timeMax:now.toISOString(),q:'Humeur',singleEvents:'true',orderBy:'startTime',maxResults:'20'})
+    const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CAL_ID)}/events?${p}`,{headers:{Authorization:`Bearer ${token}`}})
+    const d=await r.json()
+    if(!d.items){chartData=[];render();return}
+    chartData=d.items.map(ev=>{
+      const desc=ev.description||''
+      const sm=desc.match(/HSCM\s*:\s*([+-]?\d)/),slm=desc.match(/Total\s*:\s*([\dh]+)/),wm=desc.match(/Poids\s*:\s*([\d.]+)\s*kg/)
+      const s=sm?parseInt(sm[1]):0
+      const dt=new Date(ev.start?.date||ev.start?.dateTime?.split('T')[0])
+      return{date:`${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}`,score:s,sleep:slm?slm[1]:null,weight:wm?parseFloat(wm[1]):null}
+    })
+    render()
+  }catch(e){chartData=[];render()}
 }
 
-function useSleep(){
-  const[cycles,setCycles]=useState([{bed:null,sleep:null,wake:null}])
-  const[phase,setPhase]=useState('bed')
-  const now=()=>new Date()
-  const handleBed=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],bed:n};return u});setPhase('sleep')}
-  const handleSleep=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],sleep:n};return u});setPhase('wake')}
-  const handleWake=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],wake:n};return[...u,{bed:n,sleep:null,wake:null}]});setPhase('sleep')}
-  const handleFinalWake=()=>{const n=now();setCycles(p=>{const u=[...p];const l=u.length-1;if(!u[l].sleep){u.pop();u[u.length-1]={...u[u.length-1],wake:n}}else{u[l]={...u[l],wake:n}};return u});setPhase('done')}
-  const done=cycles.filter(c=>c.sleep&&c.wake)
-  const totalSleep=done.reduce((a,c)=>a+diff(c.sleep,c.wake),0)
-  const firstBed=cycles[0]?.bed
-  const lastWake=cycles.filter(c=>c.wake).slice(-1)[0]?.wake
-  const totalBed=firstBed&&lastWake?diff(firstBed,lastWake):0
-  const summary={bedtime:fmtTime(firstBed),wakeup:fmtTime(lastWake),totalSleep:fmt(totalSleep),totalBed:fmt(totalBed),cycleCount:done.length,cycles:done.map((c,i)=>({label:`Cycle ${i+1}`,sleep:fmtTime(c.sleep),wake:fmtTime(c.wake),dur:fmt(diff(c.sleep,c.wake))}))}
-  const reset=()=>{setCycles([{bed:null,sleep:null,wake:null}]);setPhase('bed')}
-  return{phase,summary,firstBed,lastWake,handleBed,handleSleep,handleWake,handleFinalWake,reset}
+async function saveCalendar(sum){
+  const today=new Date().toISOString().split('T')[0],sign=score>0?`+${score}`:String(score)
+  const desc=[`📊 HSCM : ${sign} — ${sl(score)}`,`🛌 Couché : ${sum.bedtime} | ⏰ Levé : ${sum.wakeup}`,`💤 Total : ${sum.totalSleep||'?'} (${sum.cycleCount} cycles)`,`💊 Médication : ${med===true?'Prise ✅':med===false?'Omise ❌':'?'}`,medSOS?`🆘 SOS : ${medSOS}`:null,weight?`⚖️ Poids : ${weight} kg`:null,`📝 ${comment}`,`🔬 ${analysis.justification}`].filter(Boolean).join('\n')
+  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CAL_ID)}/events`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({summary:`Humeur ${sign} — ${sl(score)}`,description:desc,start:{date:today},end:{date:today},colorId:calCol(score),visibility:'private',transparency:'transparent'})})
+  if(!r.ok)throw new Error('Calendar '+r.status)
 }
 
-async function fetchChart(token){
-  const now=new Date(),from=new Date(now);from.setDate(from.getDate()-7)
-  const p=new URLSearchParams({timeMin:from.toISOString(),timeMax:now.toISOString(),q:'Humeur',singleEvents:'true',orderBy:'startTime',maxResults:'20'})
-  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${p}`,{headers:{Authorization:`Bearer ${token}`}})
-  const d=await r.json()
-  if(!d.items)return[]
-  return d.items.map(ev=>{
-    const desc=ev.description||''
-    const sc=desc.match(/HSCM\s*
+async function saveDraft(sum){
+  const today=new Date()
+  const dateLabel=today.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
+  const todayShort=today.toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})
+  const sign=score>0?`+${score}`:String(score),color=sc(score)
+  const calLink=`https://calendar.google.com/calendar/r/day/${today.toISOString().split('T')[0].replace(/-/g,'/')}`
+
+  // SVG chart
+  const W=460,H=130,bW=42,gap=16,sX=10,midY=65,scl=12
+  const allData=[...chartData.slice(-6),{date:today.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}),score,sleep:sum.totalSleep,weight:weight?parseFloat(weight):null}]
+  const bars=allData.map((d,i)=>{const x=sX+i*(bW+gap),bH=Math.abs(d.score)*scl,y=d.score>=0?midY-bH:midY,c=sc(d.score),s=d.score>0?`+${d.score}`:String(d.score);return`<rect x="${x}" y="${y}" width="${bW}" height="${Math.max(bH,2)}" fill="${c}" rx="3"/><text x="${x+bW/2}" y="${d.score>=0?y-4:y+bH+13}" text-anchor="middle" font-size="10" font-weight="bold" fill="${c}">${s}</text><text x="${x+bW/2}" y="${H-3}" text-anchor="middle" font-size="8" fill="#555">${d.date}</text>`}).join('')
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="background:#1a1a2e;border-radius:8px;display:block"><line x1="0" y1="${midY}" x2="${W}" y2="${midY}" stroke="#333" stroke-width="1"/>${bars}</svg>`
+
+  const rows=allData.map(d=>{const s=d.score>0?`+${d.score}`:String(d.score),c=sc(d.score);return`<tr><td style="padding:6px 10px;border-bottom:1px solid #2d2d4e">${d.date}</td><td style="padding:6px 10px;border-bottom:1px solid #2d2d4e;color:${c};font-weight:bold">${s}</td><td style="padding:6px 10px;border-bottom:1px solid #2d2d4e">${sl(d.score)}</td><td style="padding:6px 10px;border-bottom:1px solid #2d2d4e;color:#888">${d.sleep||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #2d2d4e;color:#f59e0b">${d.weight?d.weight+'kg':'—'}</td></tr>`}).join('')
+
+  const html=`<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#0f0f1a;color:#ddd;padding:24px;max-width:620px;margin:0 auto">
+<h2 style="color:#a78bfa">📊 Journal HSCM — ${dateLabel}</h2>
+<p style="background:#1e1e3a;padding:14px;border-radius:8px;line-height:1.7;margin:16px 0;color:#cbd5e1">Dans le cadre du suivi de <strong>M. Darmon</strong>, veuillez trouver ci-dessous le rapport journalier HSCM automatisé.</p>
+<table style="border-collapse:collapse;width:100%;background:#1a1a2e;border-radius:8px;margin-bottom:20px">
+<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">🎭 Humeur</td><td style="padding:10px 14px;color:${color};font-weight:900;font-size:16px">${sign} — ${sl(score)}</td></tr>
+<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">🛌 Couché</td><td style="padding:10px 14px">${sum.bedtime||'—'}</td></tr>
+<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">⏰ Levé</td><td style="padding:10px 14px">${sum.wakeup||'—'}</td></tr>
+<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">💤 Sommeil</td><td style="padding:10px 14px">${sum.totalSleep||'—'} (${sum.cycleCount} cycle${sum.cycleCount>1?'s':''})</td></tr>
+<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">💊 Médication</td><td style="padding:10px 14px">${med===true?'✅ Prise':med===false?'❌ Omise':'—'}</td></tr>
+${medSOS?`<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">🆘 SOS</td><td style="padding:10px 14px;color:#fbbf24">${medSOS}</td></tr>`:''}
+${weight?`<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">⚖️ Poids</td><td style="padding:10px 14px;color:#f59e0b;font-weight:bold">${weight} kg</td></tr>`:''}
+</table>
+<div style="background:#1e1e3a;padding:14px;border-left:4px solid #a78bfa;border-radius:4px;margin-bottom:16px"><b style="color:#a78bfa">📝 Commentaire</b><br/><br/><i style="color:#cbd5e1">"${comment}"</i></div>
+<div style="background:#1e1e3a;padding:14px;border-left:4px solid ${color};border-radius:4px;margin-bottom:24px"><b style="color:${color}">🔬 Analyse clinique IA</b><br/><br/><span style="color:#94a3b8">${analysis.justification}</span></div>
+<h3 style="color:#a78bfa;margin-bottom:12px">📈 7 derniers jours</h3>
+${svg}
+<table style="border-collapse:collapse;width:100%;margin-top:16px;font-size:12px;background:#1a1a2e;border-radius:8px">
+<tr style="background:#0f0f1a;color:#64748b;font-size:11px"><th style="padding:8px 10px;text-align:left">Date</th><th style="padding:8px 10px;text-align:left">Score</th><th style="padding:8px 10px;text-align:left">Niveau</th><th style="padding:8px 10px;text-align:left">Sommeil</th><th style="padding:8px 10px;text-align:left">Poids</th></tr>
+${rows}
+</table>
+<div style="text-align:center;margin-top:24px"><a href="${calLink}" style="background:#7c3aed;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">📅 Google Calendar</a></div>
+<div style="margin-top:28px;padding:14px;background:#1e1e3a;border:1px solid #374151;border-radius:8px;font-size:11px;color:#64748b;line-height:1.6">${LEGAL}<br/><strong>Date :</strong> ${todayShort}</div>
+</body></html>`
+
+  const subj=`Journal HSCM — ${todayShort} — M. Darmon`
+  const raw=[`To: ${EMAILS.join(', ')}`,`Subject: =?utf-8?B?${btoa(unescape(encodeURIComponent(subj)))}?=`,'MIME-Version: 1.0','Content-Type: text/html; charset=utf-8','Content-Transfer-Encoding: base64','',btoa(unescape(encodeURIComponent(html)))].join('\r\n')
+  const enc=btoa(unescape(encodeURIComponent(raw))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')
+  const r=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({message:{raw:enc}})})
+  if(!r.ok)throw new Error('Gmail '+r.status)
+}
+
+// ── ANALYSE ──────────────────────────────────────────────────────
+async function doAnalyze(){
+  const t=qs('#comment-input')?.value||comment
+  comment=t
+  if(!comment.trim()){alert('Ajoute un commentaire.');return}
+  if(med===null){alert('Indique ta médication.');return}
+  step='analyzing';render()
+  const sum=getSleepSummary()
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:`Tu es un psychiatre spécialisé en troubles bipolaires utilisant le protocole HSCM.\nDétermine le score HSCM de -4 à +4.\n+4 Manie sévère|+3 Manie|+2 Hypomanie marquée|+1 Hypomanie légère|0 Normal|-1 Dép. légère|-2 Légère-mod.|-3 Modérée|-4 Sévère\nSommeil: couché ${sum.bedtime}, levé ${sum.wakeup}, total ${sum.totalSleep||'?'} (${sum.cycleCount} cycles)\nMédication: ${med===true?'Prise':med===false?'Omise':'?'} | SOS: ${medSOS||'aucun'} | Poids: ${weight?weight+' kg':'?'}\nCommentaire: "${comment}"\nJSON uniquement: {"score":0,"justification":"3-4 phrases.","alerte":""}`}]})})
+    const d=await r.json()
+    const txt=d.content?.find(b=>b.type==='text')?.text||''
+    analysis=JSON.parse(txt.replace(/```json|```/g,'').trim())
+    score=analysis.score
+    step='result';render()
+  }catch(e){alert('Erreur analyse: '+e.message);step='form';render()}
+}
+
+async function doConfirm(){
+  step='saving';saveStatus='Enregistrement Calendar…';render()
+  const sum=getSleepSummary()
+  try{
+    await saveCalendar(sum)
+    saveStatus='Brouillon Gmail…';render()
+    await saveDraft(sum)
+    step='done';render()
+  }catch(e){saveStatus='Erreur: '+e.message;step='result';render()}
+}
+
+function doReset(){
+  cycles=[{bed:null,sleep:null,wake:null}];phase='bed'
+  med=null;medSOS=null;comment='';weight='';listening=false
+  analysis=null;score=null;saveStatus='';step='form'
+  loadChart();render()
+}
+
+function doVoice(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition
+  if(!SR){alert('Dictée non disponible sur ce navigateur.');return}
+  const r=new SR();r.lang='fr-FR';r.continuous=false;r.interimResults=false
+  r.onstart=()=>{listening=true;render()}
+  r.onresult=e=>{comment=(comment+(comment?' ':'')+e.results[0][0].transcript);listening=false;render()}
+  r.onend=()=>{listening=false;render()}
+  r.onerror=()=>{listening=false;render()}
+  r.start()
+}
+
+// ── SVG CHART (inline dans l'app) ───────────────────────────────
+function buildChart(){
+  if(!chartData.length)return''
+  const W=440,H=120,bW=40,gap=Math.floor((W-40)/Math.max(chartData.length,1))-bW,sX=20,midY=60,scl=11
+  const bars=chartData.map((d,i)=>{
+    const x=sX+i*(bW+(gap>4?gap:4))
+    const bH=Math.abs(d.score)*scl,y=d.score>=0?midY-bH:midY
+    const c=sc(d.score),s=d.score>0?`+${d.score}`:String(d.score)
+    return`<rect x="${x}" y="${y}" width="${bW}" height="${Math.max(bH,2)}" fill="${c}" rx="3"/>
+<text x="${x+bW/2}" y="${d.score>=0?y-3:y+bH+11}" text-anchor="middle" font-size="9" font-weight="bold" fill="${c}">${s}</text>
+<text x="${x+bW/2}" y="${H-2}" text-anchor="middle" font-size="8" fill="#555">${d.date}</text>`
+  }).join('')
+  return`<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 ${W} ${H}" style="display:block;border-radius:8px;background:#0f0f1a">
+<line x1="0" y1="${midY}" x2="${W}" y2="${midY}" stroke="#2d2d4e" stroke-width="1"/>
+${bars}
+</svg>`
+}
+
+// ── RENDER ───────────────────────────────────────────────────────
+function render(){
+  const app=qs('#app')
+  if(!app)return
+  const today=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
+  const sum=getSleepSummary()
+  const SCORES=[4,3,2,1,0,-1,-2,-3,-4]
+
+  // LOGIN
+  if(step==='login'){
+    app.innerHTML=`
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:24px">
+      <div style="text-align:center">
+        <div style="font-size:52px;margin-bottom:12px">📊</div>
+        <div style="font-size:22px;font-weight:900;color:#a78bfa">Journal HSCM</div>
+        <div style="font-size:13px;color:#64748b;margin-top:6px">Suivi de M. Darmon</div>
+      </div>
+      <button onclick="signIn()" ${!authReady?'disabled':''} style="padding:16px 32px;background:${authReady?'linear-gradient(135deg,#7c3aed,#a78bfa)':'#1e1e3a'};border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:800;cursor:${authReady?'pointer':'not-allowed'}">
+        ${authReady?'🔐 Connexion Google':'Chargement…'}
+      </button>
+    </div>`
+    return
+  }
+
+  // SPINNER
+  if(step==='analyzing'||step==='saving'){
+    app.innerHTML=`<div class="spinner"><div class="spin">⟳</div><div style="font-size:16px;font-weight:700">${step==='analyzing'?'Analyse HSCM…':saveStatus}</div><div style="font-size:13px;color:#64748b">${step==='analyzing'?'Claude évalue…':'Veuillez patienter'}</div></div>`
+    return
+  }
+
+  // DONE
+  if(step==='done'){
+    app.innerHTML=`<div class="card" style="text-align:center;padding:40px;margin-top:40px">
+      <div style="font-size:52px;margin-bottom:12px">✅</div>
+      <div style="font-size:20px;font-weight:900;color:#22c55e;margin-bottom:8px">Journal enregistré</div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:24px">Calendar ✓ · Ouvre Gmail → Brouillons → Envoyer</div>
+      <a href="https://calendar.google.com/calendar/r/day/${new Date().toISOString().split('T')[0].replace(/-/g,'/')}" target="_blank" style="display:inline-block;background:#7c3aed;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:700;margin-bottom:16px">📅 Google Calendar</a><br/>
+      <button onclick="doReset()" style="background:none;border:1px solid #3d3d6b;border-radius:8px;color:#64748b;padding:10px 20px;cursor:pointer;font-size:13px;margin-top:12px">↺ Nouvelle entrée</button>
+    </div>`
+    return
+  }
+
+  // RÉSULTAT
+  if(step==='result'&&analysis){
+    const scoreSign=score>0?`+${score}`:String(score)
+    app.innerHTML=`
+    <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #1e1e3a">
+      <div style="font-size:20px;font-weight:900;color:#a78bfa">📊 Journal HSCM</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">${today}</div>
+    </div>
+    <div class="card" style="border-color:${sc(score)}55;background:${sc(score)}11">
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-size:52px;font-weight:900;color:${sc(score)}">${scoreSign}</div>
+        <div style="font-size:15px;color:${sc(score)};font-weight:700">${sl(score)}</div>
+      </div>
+      <div style="font-size:13px;color:#94a3b8;line-height:1.7;border-top:1px solid #2d2d4e;padding-top:12px">${analysis.justification}</div>
+      ${analysis.alerte?`<div style="margin-top:12px;padding:10px 14px;background:#7f1d1d44;border:1px solid #ef4444;border-radius:8px;font-size:13px;color:#fca5a5">⚠️ ${analysis.alerte}</div>`:''}
+    </div>
+    <div class="card">
+      <div class="lbl">Corriger si besoin</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+        ${SCORES.map(s=>`<button class="btn-score" onclick="score=${s};render()" style="border-color:${score===s?sc(s):'#2d2d4e'};background:${score===s?sc(s)+'22':'#0f0f1a'};color:${score===s?sc(s):'#64748b'}">${s>0?'+'+s:s}<div style="font-size:9px;font-weight:400;margin-top:2px;opacity:0.8">${sl(s).split(' ').slice(0,2).join(' ')}</div></button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="lbl">Récap</div>
+      <div style="font-size:13px;color:#94a3b8;line-height:2">
+        <div>🎭 Score : <strong style="color:${sc(score)}">${scoreSign}</strong></div>
+        <div>💤 Sommeil : <strong>${sum.totalSleep||'—'}</strong></div>
+        <div>💊 Médication : <strong>${med===true?'✅ Prise':'❌ Omise'}</strong></div>
+        ${medSOS?`<div>🆘 SOS : <strong style="color:#f59e0b">${medSOS}</strong></div>`:''}
+        ${weight?`<div>⚖️ Poids : <strong style="color:#f59e0b">${weight} kg</strong></div>`:''}
+      </div>
+    </div>
+    ${saveStatus?`<div style="color:#ef4444;font-size:13px;text-align:center;margin-bottom:8px">${saveStatus}</div>`:''}
+    <button class="btn-confirm" onclick="doConfirm()">✓ Valider et enregistrer</button>`
+    return
+  }
+
+  // FORMULAIRE PRINCIPAL
+  app.innerHTML=`
+  <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #1e1e3a">
+    <div style="font-size:20px;font-weight:900;color:#a78bfa">📊 Journal HSCM</div>
+    <div style="font-size:12px;color:#64748b;margin-top:4px">${today}</div>
+    <button onclick="signOut()" style="background:none;border:none;color:#374151;font-size:11px;cursor:pointer;margin-top:4px">Déconnexion</button>
+  </div>
+
+  ${chartData.length?`<div class="card"><div class="lbl">7 derniers jours</div>${buildChart()}</div>`:''}
+
+  <div class="card">
+    <div class="lbl">Sommeil</div>
+    <button class="btn-sleep" onclick="${phase==='bed'?'handleBed()':''}" style="background:${phase==='bed'?'#7c3aed22':'#0f0f1a'};border-color:${phase==='bed'?'#7c3aed':'#2d2d4e'};color:${phase==='bed'?'#a78bfa':'#374151'};cursor:${phase==='bed'?'pointer':'not-allowed'}">
+      <div><div>🛌 Je me couche</div><div style="font-size:11px;color:#64748b;font-weight:400">${cycles[0]?.bed?fmtT(cycles[0].bed):'Tape quand tu te mets au lit'}</div></div>
+      ${cycles[0]?.bed?'<span>✓</span>':''}
+    </button>
+    <button class="btn-sleep" onclick="${phase==='sleep'?'handleSleep()':''}" style="background:${phase==='sleep'?'#60a5fa22':'#0f0f1a'};border-color:${phase==='sleep'?'#60a5fa':'#2d2d4e'};color:${phase==='sleep'?'#60a5fa':'#374151'};cursor:${phase==='sleep'?'pointer':'not-allowed'}">
+      <div><div>😴 Je m'endors</div><div style="font-size:11px;color:#64748b;font-weight:400">Tape quand le sommeil vient</div></div>
+    </button>
+    <button class="btn-sleep" onclick="${phase==='wake'?'handleWake()':''}" style="background:${phase==='wake'?'#22c55e22':'#0f0f1a'};border-color:${phase==='wake'?'#22c55e':'#2d2d4e'};color:${phase==='wake'?'#22c55e':'#374151'};cursor:${phase==='wake'?'pointer':'not-allowed'}">
+      <div><div>☀️ Je me réveille</div><div style="font-size:11px;color:#64748b;font-weight:400">${phase==='wake'?'Ou → Réveil définitif ci-dessous':'Tape à chaque réveil'}</div></div>
+    </button>
+    ${phase==='wake'?`<button onclick="handleFinalWake()" style="width:100%;padding:12px;background:#052e16;border:2px solid #16a34a;border-radius:10px;color:#22c55e;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">✅ Réveil définitif</button>`:''}
+    ${sum.cycles.length?`<div style="margin-top:10px;border-top:1px solid #2d2d4e;padding-top:10px">
+      ${sum.cycles.map(c=>`<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;color:#94a3b8"><span>${c.label}</span><span>${c.s} → ${c.w}</span><span style="color:#22c55e">${c.d}</span></div>`).join('')}
+      ${sum.totalSleep?`<div style="text-align:center;font-size:14px;color:#22c55e;font-weight:800;margin-top:8px">💤 ${sum.totalSleep} ${sum.totalBed?`<span style="color:#a78bfa;font-size:12px;margin-left:10px">🛏 ${sum.totalBed}</span>`:''}</div>`:''}
+    </div>`:''}
+    <button onclick="resetSleep()" style="background:none;border:none;color:#374151;font-size:11px;cursor:pointer;margin-top:8px;display:block;width:100%;text-align:center">↺ Réinitialiser sommeil</button>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Poids</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <input type="number" step="0.1" min="30" max="200" placeholder="Ex: 78.5" value="${weight}" oninput="weight=this.value" style="flex:1"/>
+      <span style="color:#64748b;font-size:14px">kg</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Médication classique</div>
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <button class="btn-med" onclick="med=true;render()" style="background:${med===true?'#05301444':'#0f0f1a'};border-color:${med===true?'#22c55e':'#2d2d4e'};color:${med===true?'#22c55e':'#64748b'}">✅ Prise</button>
+      <button class="btn-med" onclick="med=false;render()" style="background:${med===false?'#7f1d1d44':'#0f0f1a'};border-color:${med===false?'#ef4444':'#2d2d4e'};color:${med===false?'#ef4444':'#64748b'}">❌ Omise</button>
+    </div>
+    <div class="lbl">Médicament SOS</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-sos" onclick="medSOS=medSOS==='anxiolytique'?null:'anxiolytique';render()" style="background:${medSOS==='anxiolytique'?'#45180344':'#0f0f1a'};border-color:${medSOS==='anxiolytique'?'#f59e0b':'#2d2d4e'};color:${medSOS==='anxiolytique'?'#f59e0b':'#64748b'}">😰 Anxiolytique</button>
+      <button class="btn-sos" onclick="medSOS=medSOS==='somnifere'?null:'somnifere';render()" style="background:${medSOS==='somnifere'?'#45180344':'#0f0f1a'};border-color:${medSOS==='somnifere'?'#f59e0b':'#2d2d4e'};color:${medSOS==='somnifere'?'#f59e0b':'#64748b'}">💊 Somnifère</button>
+      <button class="btn-sos" onclick="medSOS=null;render()" style="background:#0f0f1a;border-color:#2d2d4e;color:#64748b">✗ Aucun</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Comment tu te sens aujourd'hui ?</div>
+    <textarea id="comment-input" placeholder="Décris librement : ton humeur, ton énergie, ce que tu as vécu…" oninput="comment=this.value">${comment}</textarea>
+    <button onclick="doVoice()" style="margin-top:8px;width:100%;padding:10px;background:${listening?'#7f1d1d44':'#1e1b4b'};border:1px solid ${listening?'#ef4444':'#3730a3'};border-radius:8px;color:${listening?'#ef4444':'#a78bfa'};cursor:pointer;font-size:13px;font-weight:700">${listening?'🔴 Écoute…':'🎙 Dicter (vocal)'}</button>
+  </div>
+
+  <button class="btn-analyze" onclick="doAnalyze()">Analyser →</button>`
+}
+
+render()
+</script>
+</body>
+</html>
+
