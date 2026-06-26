@@ -1,19 +1,153 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Humeur">
-<title>Journal Humeur HSCM</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Journal HSCM"/>
+<meta name="theme-color" content="#0a0a1a"/>
+<title>Journal HSCM</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  :root {
-    --bg:#0a0f1e; --surface:#131929; --surface2:#1c2640; --border:#2a3a5c;
-    --text:#e8edf8; --muted:#5a7098; --accent:#3b82f6;
-  }
-  body {
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;
-    min-height:100vh; min-height:-webkit-fill-available;
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0a0a1a;font-family:'Inter',system-ui,sans-serif;color:#e2e8f0}
+#root{max-width:480px;margin:0 auto;min-height:100vh}
+input,textarea,button{font-family:'Inter',system-ui,sans-serif}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const GOOGLE_CLIENT_ID = '757607436733-5cv7pbhmdo11ojl3310n62jejfloul4o.apps.googleusercontent.com'
+const CALENDAR_ID = 'mickael.darmon.consulting@gmail.com'
+const EMAIL_TO = ['mehdbou@yahoo.fr','flomathoret@gmail.com']
+const LEGAL = "⚠️ L'évaluation du score HSCM est réalisée par intelligence artificielle (Claude, Anthropic) sur la base du protocole HSCM, à partir du commentaire libre du patient. Cette analyse est indicative et ne constitue pas un diagnostic médical. Elle est soumise à la validation du Dr Boudjemaa et de Mme Mathotret."
+
+const scoreColor=s=>{if(s>=3)return'#ef4444';if(s===2)return'#f97316';if(s===1)return'#facc15';if(s===0)return'#22c55e';if(s>=-2)return'#60a5fa';return'#3730a3'}
+const scoreLabel=s=>({4:'Manie sévère',3:'Manie',2:'Hypomanie +2',1:'Hypomanie +1',0:'Normal','-1':'Dépression légère','-2':'Dépression légère-mod.','-3':'Dépression modérée','-4':'Dépression sévère'}[String(s)]??'—')
+const calColorId=s=>{if(s>=3)return'11';if(s===2)return'6';if(s===1)return'5';if(s===0)return'10';if(s>=-2)return'9';return'1'}
+const fmt=m=>{if(!m||m<=0)return null;const h=Math.floor(m/60),mn=Math.round(m%60);return`${h}h${mn>0?String(mn).padStart(2,'0'):''}`}
+const fmtTime=d=>{if(!d)return'—';return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
+const diff=(s,e)=>{if(!s||!e)return 0;let d=(e-s)/60000;if(d<0)d+=1440;return Math.max(0,d)}
+
+const {useState,useEffect}=React
+const {BarChart,Bar,LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,ReferenceLine,Cell,ResponsiveContainer}=Recharts
+
+function useAuth(){
+  const[token,setToken]=useState(null)
+  const[ready,setReady]=useState(false)
+  useEffect(()=>{const t=setInterval(()=>{if(window.google?.accounts?.oauth2){setReady(true);clearInterval(t)}},300);return()=>clearInterval(t)},[])
+  const signIn=()=>{if(!ready)return;window.google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.compose',callback:r=>{if(r.access_token)setToken(r.access_token)}}).requestAccessToken()}
+  const signOut=()=>{if(token)window.google?.accounts?.oauth2?.revoke(token,()=>{});setToken(null)}
+  return{token,ready,signIn,signOut,ok:!!token}
+}
+
+function useSleep(){
+  const[cycles,setCycles]=useState([{bed:null,sleep:null,wake:null}])
+  const[phase,setPhase]=useState('bed')
+  const now=()=>new Date()
+  const handleBed=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],bed:n};return u});setPhase('sleep')}
+  const handleSleep=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],sleep:n};return u});setPhase('wake')}
+  const handleWake=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],wake:n};return[...u,{bed:n,sleep:null,wake:null}]});setPhase('sleep')}
+  const handleFinalWake=()=>{const n=now();setCycles(p=>{const u=[...p];const l=u.length-1;if(!u[l].sleep){u.pop();u[u.length-1]={...u[u.length-1],wake:n}}else{u[l]={...u[l],wake:n}};return u});setPhase('done')}
+  const done=cycles.filter(c=>c.sleep&&c.wake)
+  const totalSleep=done.reduce((a,c)=>a+diff(c.sleep,c.wake),0)
+  const firstBed=cycles[0]?.bed
+  const lastWake=cycles.filter(c=>c.wake).slice(-1)[0]?.wake
+  const totalBed=firstBed&&lastWake?diff(firstBed,lastWake):0
+  const summary={bedtime:fmtTime(firstBed),wakeup:fmtTime(lastWake),totalSleep:fmt(totalSleep),totalBed:fmt(totalBed),cycleCount:done.length,cycles:done.map((c,i)=>({label:`Cycle ${i+1}`,sleep:fmtTime(c.sleep),wake:fmtTime(c.wake),dur:fmt(diff(c.sleep,c.wake))}))}
+  const reset=()=>{setCycles([{bed:null,sleep:null,wake:null}]);setPhase('bed')}
+  return{phase,summary,firstBed,lastWake,handleBed,handleSleep,handleWake,handleFinalWake,reset}
+}
+
+async function fetchChart(token){
+  const now=new Date(),from=new Date(now);from.setDate(from.getDate()-7)
+  const p=new URLSearchParams({timeMin:from.toISOString(),timeMax:now.toISOString(),q:'Humeur',singleEvents:'true',orderBy:'startTime',maxResults:'20'})
+  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${p}`,{headers:{Authorization:`Bearer ${token}`}})
+  const d=await r.json()
+  if(!d.items)return[]
+  return d.items.map(ev=>{
+    const desc=ev.description||''
+    const sc=desc.match(/HSCM\s*<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Journal HSCM"/>
+<meta name="theme-color" content="#0a0a1a"/>
+<title>Journal HSCM</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0a0a1a;font-family:'Inter',system-ui,sans-serif;color:#e2e8f0}
+#root{max-width:480px;margin:0 auto;min-height:100vh}
+input,textarea,button{font-family:'Inter',system-ui,sans-serif}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const GOOGLE_CLIENT_ID = '757607436733-5cv7pbhmdo11ojl3310n62jejfloul4o.apps.googleusercontent.com'
+const CALENDAR_ID = 'mickael.darmon.consulting@gmail.com'
+const EMAIL_TO = ['mehdbou@yahoo.fr','flomathoret@gmail.com']
+const LEGAL = "⚠️ L'évaluation du score HSCM est réalisée par intelligence artificielle (Claude, Anthropic) sur la base du protocole HSCM, à partir du commentaire libre du patient. Cette analyse est indicative et ne constitue pas un diagnostic médical. Elle est soumise à la validation du Dr Boudjemaa et de Mme Mathotret."
+
+const scoreColor=s=>{if(s>=3)return'#ef4444';if(s===2)return'#f97316';if(s===1)return'#facc15';if(s===0)return'#22c55e';if(s>=-2)return'#60a5fa';return'#3730a3'}
+const scoreLabel=s=>({4:'Manie sévère',3:'Manie',2:'Hypomanie +2',1:'Hypomanie +1',0:'Normal','-1':'Dépression légère','-2':'Dépression légère-mod.','-3':'Dépression modérée','-4':'Dépression sévère'}[String(s)]??'—')
+const calColorId=s=>{if(s>=3)return'11';if(s===2)return'6';if(s===1)return'5';if(s===0)return'10';if(s>=-2)return'9';return'1'}
+const fmt=m=>{if(!m||m<=0)return null;const h=Math.floor(m/60),mn=Math.round(m%60);return`${h}h${mn>0?String(mn).padStart(2,'0'):''}`}
+const fmtTime=d=>{if(!d)return'—';return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
+const diff=(s,e)=>{if(!s||!e)return 0;let d=(e-s)/60000;if(d<0)d+=1440;return Math.max(0,d)}
+
+const {useState,useEffect}=React
+const {BarChart,Bar,LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,ReferenceLine,Cell,ResponsiveContainer}=Recharts
+
+function useAuth(){
+  const[token,setToken]=useState(null)
+  const[ready,setReady]=useState(false)
+  useEffect(()=>{const t=setInterval(()=>{if(window.google?.accounts?.oauth2){setReady(true);clearInterval(t)}},300);return()=>clearInterval(t)},[])
+  const signIn=()=>{if(!ready)return;window.google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.compose',callback:r=>{if(r.access_token)setToken(r.access_token)}}).requestAccessToken()}
+  const signOut=()=>{if(token)window.google?.accounts?.oauth2?.revoke(token,()=>{});setToken(null)}
+  return{token,ready,signIn,signOut,ok:!!token}
+}
+
+function useSleep(){
+  const[cycles,setCycles]=useState([{bed:null,sleep:null,wake:null}])
+  const[phase,setPhase]=useState('bed')
+  const now=()=>new Date()
+  const handleBed=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],bed:n};return u});setPhase('sleep')}
+  const handleSleep=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],sleep:n};return u});setPhase('wake')}
+  const handleWake=()=>{const n=now();setCycles(p=>{const u=[...p];u[u.length-1]={...u[u.length-1],wake:n};return[...u,{bed:n,sleep:null,wake:null}]});setPhase('sleep')}
+  const handleFinalWake=()=>{const n=now();setCycles(p=>{const u=[...p];const l=u.length-1;if(!u[l].sleep){u.pop();u[u.length-1]={...u[u.length-1],wake:n}}else{u[l]={...u[l],wake:n}};return u});setPhase('done')}
+  const done=cycles.filter(c=>c.sleep&&c.wake)
+  const totalSleep=done.reduce((a,c)=>a+diff(c.sleep,c.wake),0)
+  const firstBed=cycles[0]?.bed
+  const lastWake=cycles.filter(c=>c.wake).slice(-1)[0]?.wake
+  const totalBed=firstBed&&lastWake?diff(firstBed,lastWake):0
+  const summary={bedtime:fmtTime(firstBed),wakeup:fmtTime(lastWake),totalSleep:fmt(totalSleep),totalBed:fmt(totalBed),cycleCount:done.length,cycles:done.map((c,i)=>({label:`Cycle ${i+1}`,sleep:fmtTime(c.sleep),wake:fmtTime(c.wake),dur:fmt(diff(c.sleep,c.wake))}))}
+  const reset=()=>{setCycles([{bed:null,sleep:null,wake:null}]);setPhase('bed')}
+  return{phase,summary,firstBed,lastWake,handleBed,handleSleep,handleWake,handleFinalWake,reset}
+}
+
+async function fetchChart(token){
+  const now=new Date(),from=new Date(now);from.setDate(from.getDate()-7)
+  const p=new URLSearchParams({timeMin:from.toISOString(),timeMax:now.toISOString(),q:'Humeur',singleEvents:'true',orderBy:'startTime',maxResults:'20'})
+  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${p}`,{headers:{Authorization:`Bearer ${token}`}})
+  const d=await r.json()
+  if(!d.items)return[]
+  return d.items.map(ev=>{
+    const desc=ev.description||''
+    const sc=desc.match(/HSCM\s*
