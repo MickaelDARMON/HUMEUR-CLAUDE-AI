@@ -41,39 +41,59 @@ const dif=(a,b)=>{if(!a||!b)return 0;let d=(b-a)/60000;if(d<0)d+=1440;return Mat
 // ── ANALYSE LOCALE HSCM ──────────────────────────────────────────
 function analyzeLocal(comment, sleepMins, med, medSOS) {
   try {
-    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u2019\u2018']/g,' ')
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u2019\u2018\']/g,' ')
     const txt = norm(comment)
-    const has = words => words.some(w => txt.includes(norm(w)))
-    let score = 0, signals = []
+    
+    // Score par points — évite les faux positifs sur mots courts
+    const count = words => words.filter(w => txt.includes(norm(w))).length
 
-    if(has(['manie','euphorique','exalte','grandiose','invincible','genie','pas besoin de dormir','puissance infinie']))
-      { score=3; signals.push('Signes maniaques') }
-    else if(has(['tres bien','super','debordant','energie','creatif','idees qui','accelere','bavard','depense']))
-      { score=2; signals.push('Hypomanie marquée') }
-    else if(has(['bien','bonne humeur','motive','actif','optimiste','positif','ok']))
-      { score=1; signals.push('Légère hypomanie') }
+    // Signaux négatifs (dépression)
+    const neg4 = ['suicide','mourir','plus envie de rien','desespoir','paralyse','effondr','plus capable','neant','fin de tout']
+    const neg3 = ['tres mal','horrible','deprime','pleure tout','angoisse severe','sans energie','abattu','prostration','vide total','tres melancolique','tres grosse tristesse']
+    const neg2 = ['triste','melancolique','fatigue','anxieux','cafard','sombre','pas motive','epuise','tristesse','lourd','pas envie de sortir','epuisement']
+    const neg1 = ['pas top','bof','morose','un peu triste','un peu fatigue','correct sans plus','neutre']
 
-    if(score===0) {
-      if(has(['suicide','mourir','plus envie','desespoir','paralyse','effondr','plus capable','neant']))
-        { score=-4; signals.push('⚠️ Signaux sévères') }
-      else if(has(['tres mal','horrible','deprime','pleure','angoisse severe','prostr','sans energie du tout','noir total','abattu']))
-        { score=-3; signals.push('Dépression modérée-sévère') }
-      else if(has(['mal','triste','fatigue','anxieux','difficile','cafard','sombre','pas motive','lourd','epuise']))
-        { score=-2; signals.push('Dépression légère-modérée') }
-      else if(has(['pas top','bof','morose','neutre','un peu','leger','correct']))
-        { score=-1; signals.push('Humeur légèrement basse') }
-    }
+    // Signaux positifs (hypomanie/manie) — mots plus spécifiques
+    const pos3 = ['manie','euphorique','exalte','grandiose','invincible','genie','puissance infinie','pas besoin de dormir']
+    const pos2 = ['tres bien','super bien','plein d energie','debordant d energie','creatif','idees qui fusent','accelere','hypomanie']
+    const pos1 = ['bonne humeur','motive','actif','optimiste','energique']
 
-    if(sleepMins>0 && sleepMins<240 && score>=0){ score=Math.min(score+1,4); signals.push('Sommeil très court (<4h)') }
-    if(sleepMins>600 && score<=0){ score=Math.max(score-1,-4); signals.push('Hypersomnie (>10h)') }
-    if(med===false) signals.push('Médication omise')
+    let negScore = 0
+    if(count(neg4) >= 1) negScore = -4
+    else if(count(neg3) >= 1) negScore = -3
+    else if(count(neg2) >= 2) negScore = -2  // 2 signaux négatifs minimum
+    else if(count(neg2) >= 1) negScore = -1
+    else if(count(neg1) >= 1) negScore = -1
+
+    let posScore = 0
+    if(count(pos3) >= 1) posScore = 3
+    else if(count(pos2) >= 1) posScore = 2
+    else if(count(pos1) >= 2) posScore = 1  // 2 signaux positifs minimum
+
+    // Le négatif prime si les deux sont présents
+    let score = negScore !== 0 ? negScore : posScore
+    let signals = []
+
+    if(negScore <= -4) signals.push('Signaux dépressifs sévères')
+    else if(negScore <= -3) signals.push('Dépression modérée-sévère')
+    else if(negScore <= -2) signals.push('Dépression légère-modérée')
+    else if(negScore <= -1) signals.push('Humeur basse')
+    if(posScore >= 3) signals.push('Signes maniaques')
+    else if(posScore >= 2) signals.push('Hypomanie marquée')
+    else if(posScore >= 1) signals.push('Légère hypomanie')
+
+    // Ajustements objectifs
+    if(sleepMins > 0 && sleepMins < 240 && score >= 0){ score = Math.min(score+1,4); signals.push('Sommeil très court') }
+    if(sleepMins > 600 && score <= 0){ score = Math.max(score-1,-4); signals.push('Hypersomnie') }
+    if(med === false) signals.push('Médication omise')
     if(medSOS) signals.push('SOS pris: '+medSOS)
 
     const justification = signals.length
-      ? 'Éléments retenus : '+signals.join(', ')+'. Analyse selon protocole HSCM.'
-      : 'Aucun signal clinique dominant. Score 0 (normal) par défaut.'
-    const alerte = score<=-3 ? '⚠️ Score critique — contacter Dr Boudjemaa ou Mme Mathotret.'
-      : score>=3 ? '⚠️ Épisode maniaque possible — surveillance rapprochée.' : ''
+      ? 'Éléments retenus : '+signals.join(', ')+'. Analyse selon protocole HSCM sur la base du commentaire et des données objectives.'
+      : 'Aucun signal clinique dominant identifié. Score 0 (normal) attribué par défaut selon le protocole HSCM.'
+    const alerte = score <= -3
+      ? '⚠️ Score critique — contacter Dr Boudjemaa ou Mme Mathotret.'
+      : score >= 3 ? '⚠️ Épisode maniaque possible — surveillance rapprochée.' : ''
 
     return { score, justification, alerte }
   } catch(e) {
