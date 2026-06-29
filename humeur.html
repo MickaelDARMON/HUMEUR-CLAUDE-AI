@@ -51,7 +51,7 @@ function toTimeInput(d){
 }
 
 // ── ANALYSE LOCALE ───────────────────────────────────────────────
-function analyzeLocal(comment, sleepMins, med, medSOS){
+function analyzeLocal(comment, sleepMins, med, medSOS, momentsAvg, momentsList){
   try{
     function norm(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u2019\u2018']/g,' ')}
     var txt=norm(comment)
@@ -77,7 +77,19 @@ function analyzeLocal(comment, sleepMins, med, medSOS){
     else if(has(pos2)){posScore=2;signals.push('Hypomanie marquee')}
     else if(count(pos1)>=2){posScore=1;signals.push('Legere hypomanie')}
 
-    var score=negScore!==0?negScore:posScore
+    var commentScore=negScore!==0?negScore:posScore
+    var score
+
+    // Base = moyenne des emojis horaires si disponible
+    if(momentsAvg!==null&&momentsAvg!==undefined){
+      score=momentsAvg
+      signals.unshift('Moyenne de '+momentsList.length+' moment'+(momentsList.length>1?'s':'')+' : '+(momentsAvg>0?'+':'')+momentsAvg)
+      // Le commentaire peut moduler d'un cran si plus severe que la moyenne
+      if(commentScore<0&&commentScore<score){score=Math.round((score+commentScore)/2);signals.push('Ajuste par commentaire (plus bas)')}
+      else if(commentScore>0&&commentScore>score){score=Math.round((score+commentScore)/2);signals.push('Ajuste par commentaire (plus haut)')}
+    } else {
+      score=commentScore
+    }
 
     if(sleepMins>0&&sleepMins<240&&score>=0){score=Math.min(score+1,4);signals.push('Sommeil tres court')}
     if(sleepMins>600&&score<=0){score=Math.max(score-1,-4);signals.push('Hypersomnie')}
@@ -87,11 +99,22 @@ function analyzeLocal(comment, sleepMins, med, medSOS){
     var just=signals.length
       ?'Elements retenus : '+signals.join(', ')+'. Analyse selon protocole HSCM.'
       :'Aucun signal clinique dominant. Score 0 (normal) par defaut.'
+
+    // Alerte si pic extreme dans la journee meme si moyenne lisse
+    var extremeAlert=''
+    if(momentsList&&momentsList.length){
+      var ext=momentsList.reduce(function(a,m){return Math.abs(m.val)>Math.abs(a.val)?m:a},momentsList[0])
+      if((ext.val<=-3||ext.val>=3)&&ext.val!==score){
+        extremeAlert=' Pic signale a '+ext.heure+' ('+ext.emoji+' '+(ext.val>0?'+':'')+ext.val+') a surveiller malgre la moyenne.'
+      }
+    }
+
     var alerte=score<=-3
       ?'ALERTE : Score critique. Contacter Dr Boudjemaa ou Mme Mathotret.'
       :score>=3?'ALERTE : Episode maniaque possible. Surveillance rapprochee.':''
+    if(extremeAlert&&!alerte)alerte='ATTENTION :'+extremeAlert
 
-    return{score:score,justification:just,alerte:alerte}
+    return{score:score,justification:just+extremeAlert,alerte:alerte}
   }catch(e){return{score:0,justification:'Erreur analyse: '+e.message,alerte:''}}
 }
 
@@ -101,6 +124,18 @@ var cycles=[{bed:null,sleep:null,wake:null}]
 var med=null,medSOS=null,comment='',weight='',listening=false
 var analysis=null,score=null,chartData=[],saveStatus=''
 var step='login',editMode=false,editEventId=null,editDate=null
+// Nouvelles fonctions : sieste, fatigue, alimentation, hydratation
+var sieste={debut:null,fin:null}
+var fatigue={phys:null,ment:null,emot:null,impact:''}
+var repas={matin:'',midi:'',soir:'',collation:''}
+var calories='',macros=''
+var eau=0
+// Humeurs horaires (emojis) : moyenne = score du jour
+var moments=[] // {heure:'HH:MM', emoji:'🙂', val:0}
+var EMOJIS=[{e:'😖',v:-4,n:'Tres bas'},{e:'😔',v:-2,n:'Bas'},{e:'😕',v:-1,n:'Un peu bas'},{e:'🙂',v:0,n:'Normal'},{e:'😄',v:2,n:'Bien / eleve'},{e:'🤩',v:4,n:'Tres haut'}]
+var newMomentEmoji=null
+var FATLBL={phys:['Aucune','Legere','Moderee','Importante','Severe','Epuisement total'],ment:['Aucune','Legere','Moderee','Importante','Severe','Brouillard mental'],emot:['Aucune','Legere','Moderee','Importante','Severe','Vide emotionnel']}
+var EAU_OBJ=8
 
 var authTimer=setInterval(function(){
   if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
@@ -141,6 +176,43 @@ function addCycle(){cycles.push({bed:null,sleep:null,wake:null});render()}
 function removeCycle(){if(cycles.length>1){cycles.pop();render()}}
 function resetSleep(){cycles=[{bed:null,sleep:null,wake:null}];render()}
 
+// ── SIESTE / FATIGUE / ALIMENTATION / EAU ────────────────────────
+function setSieste(field,val){var d=parseTime(val);sieste[field]=d;render()}
+function siesteDuree(){if(!sieste.debut||!sieste.fin)return null;return fmtMins(diffMins(sieste.debut,sieste.fin))}
+function setFatigue(dim,v){fatigue[dim]=fatigue[dim]===v?null:v;render()}
+function setEau(n){eau=eau===n?n-1:n;render()}
+function resetSieste(){sieste={debut:null,fin:null};render()}
+
+// ── HUMEURS HORAIRES (emojis) ────────────────────────────────────
+function addMoment(){
+  if(newMomentEmoji===null){alert('Choisis un emoji.');return}
+  var now=new Date()
+  var em=EMOJIS[newMomentEmoji]
+  moments.push({heure:toTimeInput(now),emoji:em.e,val:em.v})
+  moments.sort(function(a,b){return a.heure.localeCompare(b.heure)})
+  newMomentEmoji=null;render()
+}
+function addMomentAt(heure){
+  if(newMomentEmoji===null){alert('Choisis un emoji.');return}
+  var em=EMOJIS[newMomentEmoji]
+  moments.push({heure:heure,emoji:em.e,val:em.v})
+  moments.sort(function(a,b){return a.heure.localeCompare(b.heure)})
+  newMomentEmoji=null;render()
+}
+function removeMoment(i){moments.splice(i,1);render()}
+function momentsAverage(){
+  if(!moments.length)return null
+  var sum=moments.reduce(function(a,m){return a+m.val},0)
+  return Math.round(sum/moments.length)
+}
+function momentsExtreme(){
+  // retourne le pic le plus eloigné de 0 (pour alerte medecin)
+  if(!moments.length)return null
+  var ext=moments[0]
+  moments.forEach(function(m){if(Math.abs(m.val)>Math.abs(ext.val))ext=m})
+  return ext
+}
+
 // ── CALENDAR ─────────────────────────────────────────────────────
 function loadChart(){
   var now=new Date(),from=new Date(now)
@@ -154,8 +226,13 @@ function loadChart(){
     chartData=d.items.map(function(ev){
       var desc=ev.description||''
       var sm=desc.match(/HSCM\s*:\s*([+-]?\d)/),slm=desc.match(/Total\s*:\s*([\dh]+)/),wm=desc.match(/Poids\s*:\s*([\d.]+)/)
+      var fp=desc.match(/Fatigue physique\s*:\s*(\d)/),fm=desc.match(/Fatigue mentale\s*:\s*(\d)/),fe=desc.match(/Fatigue emotionnelle\s*:\s*(\d)/)
+      var em=desc.match(/Eau\s*:\s*(\d+)/),km=desc.match(/Calories\s*:\s*(\d+)/)
+      // sommeil en heures décimales pour graphique
+      var slh=null
+      if(slm){var hm=slm[1].match(/(\d+)h(\d*)/);if(hm)slh=parseInt(hm[1])+(hm[2]?parseInt(hm[2])/60:0)}
       var dt=new Date(ev.start&&ev.start.date?ev.start.date:(ev.start.dateTime||'').split('T')[0])
-      return{date:String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0'),score:sm?parseInt(sm[1]):0,sleep:slm?slm[1]:null,weight:wm?parseFloat(wm[1]):null,id:ev.id}
+      return{date:String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0'),score:sm?parseInt(sm[1]):0,sleep:slm?slm[1]:null,sleepH:slh,weight:wm?parseFloat(wm[1]):null,fp:fp?parseInt(fp[1]):null,fm:fm?parseInt(fm[1]):null,fe:fe?parseInt(fe[1]):null,eau:em?parseInt(em[1]):null,kcal:km?parseInt(km[1]):null,id:ev.id}
     })
     render()
   }).catch(function(){chartData=[];render()})
@@ -178,7 +255,23 @@ function loadEventForEdit(dateStr){
 async function saveCalendar(sum){
   var today=editDate||new Date().toISOString().split('T')[0]
   var sign=score>0?'+'+score:String(score)
-  var lines=['Humeur HSCM : '+sign+' - '+scoreLabel(score),'Couche : '+sum.bedtime+' | Leve : '+sum.wakeup,'Total : '+(sum.totalSleep||'?')+' ('+sum.cycleCount+' cycles)','Medication : '+(med===true?'Prise':med===false?'Omise':'?')]
+  var lines=['Humeur HSCM : '+sign+' - '+scoreLabel(score),'Couche : '+sum.bedtime+' | Leve : '+sum.wakeup,'Total : '+(sum.totalSleep||'?')+' ('+sum.cycleCount+' cycles)']
+  if(moments.length){lines.push('Moments : '+moments.map(function(m){return m.heure+' '+m.emoji+'('+(m.val>0?'+':'')+m.val+')'}).join(' | '))}
+  var sd=siesteDuree()
+  if(sd)lines.push('Sieste : '+toTimeInput(sieste.debut)+'-'+toTimeInput(sieste.fin)+' ('+sd+')')
+  else lines.push('Sieste : Aucune')
+  if(fatigue.phys!==null)lines.push('Fatigue physique : '+fatigue.phys+'/5')
+  if(fatigue.ment!==null)lines.push('Fatigue mentale : '+fatigue.ment+'/5')
+  if(fatigue.emot!==null)lines.push('Fatigue emotionnelle : '+fatigue.emot+'/5')
+  if(fatigue.impact)lines.push('Impact fatigue : '+fatigue.impact)
+  if(repas.matin)lines.push('Petit-dej : '+repas.matin)
+  if(repas.midi)lines.push('Dejeuner : '+repas.midi)
+  if(repas.soir)lines.push('Diner : '+repas.soir)
+  if(repas.collation)lines.push('Collation : '+repas.collation)
+  if(calories)lines.push('Calories : '+calories+' kcal')
+  if(macros)lines.push('Macros : '+macros)
+  lines.push('Eau : '+eau+'/'+EAU_OBJ+' verres')
+  lines.push('Medication : '+(med===true?'Prise':med===false?'Omise':'?'))
   if(medSOS)lines.push('SOS : '+medSOS)
   if(weight)lines.push('Poids : '+weight+' kg')
   lines.push('Commentaire : '+comment)
@@ -198,6 +291,46 @@ async function saveCalendar(sum){
   if(!r.ok)throw new Error('Calendar '+r.status)
 }
 
+// ── MINI-GRAPHIQUE SVG GENERIQUE (pour le mail) ──────────────────
+function miniBarSVG(data,key,opts){
+  opts=opts||{}
+  var vals=data.map(function(d){return d[key]}).filter(function(v){return v!==null&&v!==undefined})
+  if(!vals.length)return''
+  var max=opts.max||Math.max.apply(null,vals)||1
+  var W=460,H=110,n=data.length,bW=Math.floor((W-30)/n)-6,sX=15,baseY=H-22,scl=(H-40)/max
+  var color=opts.color||'#a78bfa'
+  var bars=data.map(function(d,i){
+    var v=d[key]
+    if(v===null||v===undefined)return'<text x="'+(sX+i*(bW+6)+bW/2)+'" y="'+(H-3)+'" text-anchor="middle" font-size="8" fill="#555">'+d.date+'</text>'
+    var bH=Math.max(v*scl,2),x=sX+i*(bW+6),y=baseY-bH
+    return '<rect x="'+x+'" y="'+y+'" width="'+bW+'" height="'+bH+'" fill="'+color+'" rx="3"/>'
+      +'<text x="'+(x+bW/2)+'" y="'+(y-3)+'" text-anchor="middle" font-size="9" font-weight="bold" fill="'+color+'">'+(opts.unit?v+opts.unit:v)+'</text>'
+      +'<text x="'+(x+bW/2)+'" y="'+(H-3)+'" text-anchor="middle" font-size="8" fill="#555">'+d.date+'</text>'
+  }).join('')
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block;border-radius:8px;background:#0f0f1a;margin-bottom:8px">'
+    +'<line x1="0" y1="'+baseY+'" x2="'+W+'" y2="'+baseY+'" stroke="#2d2d4e" stroke-width="1"/>'+bars+'</svg>'
+}
+// Graphique fatigue 3 dimensions (lignes superposees)
+function fatigueLineSVG(data){
+  var has=data.some(function(d){return d.fp!==null||d.fm!==null||d.fe!==null})
+  if(!has)return''
+  var W=460,H=130,n=data.length,sX=20,baseY=H-24,scl=(H-44)/5,gap=(W-40)/(n-1||1)
+  function line(key,color){
+    var pts=data.map(function(d,i){return d[key]!==null&&d[key]!==undefined?(sX+i*gap)+','+(baseY-d[key]*scl):null}).filter(Boolean).join(' ')
+    if(!pts)return''
+    return '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2.5"/>'
+      +data.map(function(d,i){return d[key]!==null&&d[key]!==undefined?'<circle cx="'+(sX+i*gap)+'" cy="'+(baseY-d[key]*scl)+'" r="3" fill="'+color+'"/>':''}).join('')
+  }
+  var labels=data.map(function(d,i){return '<text x="'+(sX+i*gap)+'" y="'+(H-4)+'" text-anchor="middle" font-size="8" fill="#555">'+d.date+'</text>'}).join('')
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block;border-radius:8px;background:#0f0f1a;margin-bottom:8px">'
+    +'<line x1="0" y1="'+baseY+'" x2="'+W+'" y2="'+baseY+'" stroke="#2d2d4e" stroke-width="1"/>'
+    +line('fp','#f87171')+line('fm','#c084fc')+line('fe','#60a5fa')+labels
+    +'<text x="'+sX+'" y="12" font-size="9" fill="#f87171">● Physique</text>'
+    +'<text x="'+(sX+90)+'" y="12" font-size="9" fill="#c084fc">● Mentale</text>'
+    +'<text x="'+(sX+180)+'" y="12" font-size="9" fill="#60a5fa">● Emotionnelle</text>'
+    +'</svg>'
+}
+
 async function saveDraft(sum){
   var today=new Date()
   var dateLabel=today.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
@@ -207,7 +340,8 @@ async function saveDraft(sum){
   var calLink='https://calendar.google.com/calendar/r/day/'+today.toISOString().split('T')[0].replace(/-/g,'/')
 
   // SVG graphique
-  var allData=chartData.slice(-6).concat([{date:today.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}),score:score,sleep:sum.totalSleep,weight:weight?parseFloat(weight):null}])
+  var sleepHnow=sum.totalMins?Math.round(sum.totalMins/60*10)/10:null
+  var allData=chartData.slice(-6).concat([{date:today.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}),score:score,sleep:sum.totalSleep,sleepH:sleepHnow,weight:weight?parseFloat(weight):null,fp:fatigue.phys,fm:fatigue.ment,fe:fatigue.emot,eau:eau||null,kcal:calories?parseInt(calories):null}])
   var W=460,H=130,bW=42,gap=16,sX=10,midY=65,scl=12
   var svgBars=allData.map(function(d,i){
     var x=sX+i*(bW+gap),bH=Math.abs(d.score)*scl,y=d.score>=0?midY-bH:midY
@@ -238,12 +372,25 @@ async function saveDraft(sum){
     +'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Leve</td><td style="padding:10px 14px">'+(sum.wakeup||'—')+'</td></tr>'
     +'<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Sommeil</td><td style="padding:10px 14px">'+(sum.totalSleep||'—')+' ('+sum.cycleCount+' cycle'+(sum.cycleCount>1?'s':'')+')</td></tr>'
     +'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Medication</td><td style="padding:10px 14px">'+(med===true?'Prise':med===false?'Omise':'—')+'</td></tr>'
+    +(siesteDuree()?'<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Sieste</td><td style="padding:10px 14px;color:#a78bfa">'+toTimeInput(sieste.debut)+'-'+toTimeInput(sieste.fin)+' ('+siesteDuree()+')</td></tr>':'')
+    +(fatigue.phys!==null?'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Fatigue physique</td><td style="padding:10px 14px;color:#f87171">'+fatigue.phys+'/5 — '+FATLBL.phys[fatigue.phys]+'</td></tr>':'')
+    +(fatigue.ment!==null?'<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Fatigue mentale</td><td style="padding:10px 14px;color:#c084fc">'+fatigue.ment+'/5 — '+FATLBL.ment[fatigue.ment]+'</td></tr>':'')
+    +(fatigue.emot!==null?'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Fatigue emotionnelle</td><td style="padding:10px 14px;color:#60a5fa">'+fatigue.emot+'/5 — '+FATLBL.emot[fatigue.emot]+'</td></tr>':'')
+    +(calories?'<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Calories</td><td style="padding:10px 14px;color:#fb923c;font-weight:bold">'+calories+' kcal'+(macros?' ('+macros+')':'')+'</td></tr>':'')
+    +'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Hydratation</td><td style="padding:10px 14px;color:#22d3ee">'+eau+'/'+EAU_OBJ+' verres</td></tr>'
     +(medSOS?'<tr style="background:#12121f"><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">SOS</td><td style="padding:10px 14px;color:#fbbf24">'+medSOS+'</td></tr>':'')
     +(weight?'<tr><td style="padding:10px 14px;color:#94a3b8;font-weight:bold">Poids</td><td style="padding:10px 14px;color:#f59e0b;font-weight:bold">'+weight+' kg</td></tr>':'')
     +'</table>'
+    +(moments.length?'<div style="background:#1e1e3a;padding:14px;border-radius:8px;margin-bottom:16px"><b style="color:#a78bfa">Humeur au fil de la journee</b><br/><br/><div style="font-size:18px;line-height:1.8">'+moments.map(function(m){return '<span style="color:#94a3b8;font-size:13px">'+m.heure+'</span> '+m.emoji+' <span style="color:'+scoreColor(m.val)+';font-size:12px;font-weight:bold">('+(m.val>0?'+':'')+m.val+')</span>'}).join('&nbsp;&nbsp;|&nbsp;&nbsp;')+'</div></div>':'')
+    +((repas.matin||repas.midi||repas.soir||repas.collation)?'<div style="background:#1e1e3a;padding:14px;border-left:4px solid #fb923c;border-radius:4px;margin-bottom:16px"><b style="color:#fb923c">Alimentation</b><br/><br/>'+(repas.matin?'<div style="color:#cbd5e1;margin-bottom:4px">🌅 <b>Petit-dej :</b> '+repas.matin+'</div>':'')+(repas.midi?'<div style="color:#cbd5e1;margin-bottom:4px">☀️ <b>Dejeuner :</b> '+repas.midi+'</div>':'')+(repas.soir?'<div style="color:#cbd5e1;margin-bottom:4px">🌙 <b>Diner :</b> '+repas.soir+'</div>':'')+(repas.collation?'<div style="color:#cbd5e1;margin-bottom:4px">🍎 <b>Collation :</b> '+repas.collation+'</div>':'')+(calories?'<div style="color:#fb923c;margin-top:6px;font-weight:bold">🔥 '+calories+' kcal'+(macros?' — '+macros:'')+'</div>':'')+'</div>':'')
+    +(fatigue.impact?'<div style="background:#1e1e3a;padding:14px;border-left:4px solid #f87171;border-radius:4px;margin-bottom:16px"><b style="color:#f87171">Impact de la fatigue</b><br/><br/><i style="color:#cbd5e1">'+fatigue.impact+'</i></div>':'')
     +'<div style="background:#1e1e3a;padding:14px;border-left:4px solid #a78bfa;border-radius:4px;margin-bottom:16px"><b style="color:#a78bfa">Commentaire</b><br/><br/><i style="color:#cbd5e1">"'+comment+'"</i></div>'
     +'<div style="background:#1e1e3a;padding:14px;border-left:4px solid '+color+';border-radius:4px;margin-bottom:24px"><b style="color:'+color+'">Analyse clinique</b><br/><br/><span style="color:#94a3b8">'+analysis.justification+'</span></div>'
     +'<h3 style="color:#a78bfa;margin-bottom:12px">Evolution 7 derniers jours</h3>'+svg
+    +'<h3 style="color:#f87171;margin:20px 0 8px;font-size:14px">⚡ Fatigue (physique / mentale / emotionnelle)</h3>'+fatigueLineSVG(allData)
+    +'<h3 style="color:#8b5cf6;margin:20px 0 8px;font-size:14px">🌙 Sommeil (heures)</h3>'+miniBarSVG(allData,'sleepH',{color:'#8b5cf6',unit:'h',max:12})
+    +'<h3 style="color:#22d3ee;margin:20px 0 8px;font-size:14px">💧 Hydratation (verres)</h3>'+miniBarSVG(allData,'eau',{color:'#22d3ee',max:10})
+    +'<h3 style="color:#fb923c;margin:20px 0 8px;font-size:14px">🔥 Calories (kcal)</h3>'+miniBarSVG(allData,'kcal',{color:'#fb923c',max:2500})
     +'<table style="border-collapse:collapse;width:100%;margin-top:16px;font-size:12px;background:#1a1a2e;border-radius:8px">'
     +'<tr style="background:#0f0f1a;color:#64748b;font-size:11px"><th style="padding:8px 10px;text-align:left">Date</th><th style="padding:8px 10px;text-align:left">Score</th><th style="padding:8px 10px;text-align:left">Niveau</th><th style="padding:8px 10px;text-align:left">Sommeil</th><th style="padding:8px 10px;text-align:left">Poids</th></tr>'
     +tableRows+'</table>'
@@ -262,13 +409,14 @@ async function saveDraft(sum){
 function doAnalyze(){
   var ta=document.getElementById('ta')
   if(ta)comment=ta.value
-  if(!comment.trim()){alert('Ajoute un commentaire.');return}
+  if(!comment.trim()&&!moments.length){alert('Ajoute au moins un moment d\'humeur ou un commentaire.');return}
   if(med===null){alert('Indique ta medication.');return}
   step='analyzing';render()
   var sum=getSleep()
+  var avg=momentsAverage()
   setTimeout(function(){
     try{
-      analysis=analyzeLocal(comment,sum.totalMins,med,medSOS)
+      analysis=analyzeLocal(comment,sum.totalMins,med,medSOS,avg,moments)
       score=analysis.score;step='result';render()
     }catch(e){alert('Erreur: '+e.message);step='form';render()}
   },600)
@@ -312,18 +460,26 @@ function doReset(){
   cycles=[{bed:null,sleep:null,wake:null}]
   med=null;medSOS=null;comment='';weight='';listening=false
   analysis=null;score=null;saveStatus='';editMode=false;editEventId=null;editDate=null
+  sieste={debut:null,fin:null};fatigue={phys:null,ment:null,emot:null,impact:''}
+  repas={matin:'',midi:'',soir:'',collation:''};calories='';macros='';eau=0
+  moments=[];newMomentEmoji=null
   step='form';loadChart();render()
 }
 
-function doVoice(){
+function doVoice(){doVoiceTo('comment','ta')}
+// Dictée vocale universelle : target = nom variable ou 'repas.matin', dom = id textarea
+var voiceTarget=null
+function doVoiceTo(target,domId){
   var SR=window.SpeechRecognition||window.webkitSpeechRecognition
   if(!SR){alert('Dictee non disponible. Utilise le clavier.');return}
   var r=new SR();r.lang='fr-FR';r.continuous=false;r.interimResults=false
-  r.onstart=function(){listening=true;render()}
+  voiceTarget=target
+  r.onstart=function(){listening=target;render()}
   r.onresult=function(e){
-    var ta=document.getElementById('ta')
-    comment=(comment+(comment?' ':'')+e.results[0][0].transcript)
-    if(ta)ta.value=comment
+    var t=e.results[0][0].transcript
+    if(target==='comment'){comment=comment+(comment?' ':'')+t}
+    else if(target.indexOf('repas.')===0){var k=target.split('.')[1];repas[k]=repas[k]+(repas[k]?' ':'')+t}
+    else if(target==='fatigue.impact'){fatigue.impact=fatigue.impact+(fatigue.impact?' ':'')+t}
     listening=false;render()
   }
   r.onend=function(){listening=false;render()}
@@ -441,6 +597,39 @@ function render(){
     html+='<div class="card"><div class="lbl">7 derniers jours</div>'+buildChart()+'</div>'
   }
 
+  // HUMEUR DU MOMENT (emojis horaires)
+  html+='<div class="card"><div class="lbl">Humeur du moment</div>'
+    +'<div style="font-size:11px;color:#64748b;margin-bottom:10px">Note ton humeur quand tu veux dans la journee. Le score HSCM du jour = moyenne.</div>'
+    +'<div style="display:flex;gap:5px;margin-bottom:10px">'
+  EMOJIS.forEach(function(em,i){
+    var on=newMomentEmoji===i
+    html+='<button onclick="newMomentEmoji='+i+';render()" style="flex:1;padding:10px 0;border-radius:10px;border:2px solid '+(on?scoreColor(em.v):'#2d2d4e')+';background:'+(on?scoreColor(em.v)+'22':'#0f0f1a')+';cursor:pointer;font-size:24px" title="'+em.n+'">'+em.e+'</button>'
+  })
+  html+='</div>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<input type="time" class="tinput" id="momTime" style="flex:1" value="'+toTimeInput(new Date())+'"/>'
+    +'<button onclick="addMomentAt(document.getElementById(\'momTime\').value)" style="flex:1;padding:11px;background:#1e1b4b;border:1px solid #3730a3;border-radius:8px;color:#a78bfa;cursor:pointer;font-size:13px;font-weight:700">+ Ajouter ce moment</button>'
+    +'</div>'
+  if(moments.length){
+    html+='<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">'
+    moments.forEach(function(m,i){
+      html+='<div style="display:flex;align-items:center;gap:10px;background:#0f0f1a;border-radius:8px;padding:8px 12px">'
+        +'<span style="font-size:22px">'+m.emoji+'</span>'
+        +'<span style="color:#94a3b8;font-size:13px;font-weight:600">'+m.heure+'</span>'
+        +'<span style="color:'+scoreColor(m.val)+';font-size:12px;font-weight:700;margin-left:auto">'+(m.val>0?'+':'')+m.val+'</span>'
+        +'<button onclick="removeMoment('+i+')" style="background:none;border:none;color:#4b5563;font-size:18px;cursor:pointer;padding:0 4px">×</button>'
+        +'</div>'
+    })
+    var avg=momentsAverage()
+    html+='</div>'
+      +'<div style="margin-top:10px;background:'+scoreColor(avg)+'22;border:1px solid '+scoreColor(avg)+'55;border-radius:8px;padding:10px;text-align:center">'
+      +'<span style="font-size:12px;color:#94a3b8">Moyenne du jour : </span>'
+      +'<span style="font-size:16px;font-weight:900;color:'+scoreColor(avg)+'">'+(avg>0?'+':'')+avg+' — '+scoreLabel(avg)+'</span>'
+      +'</div>'
+  }
+  html+='</div>'
+
+
   // SOMMEIL
   html+='<div class="card"><div class="lbl">Sommeil</div>'
     +'<div class="sublbl" style="margin-top:4px">Saisie manuelle</div>'
@@ -473,11 +662,75 @@ function render(){
   html+='<button onclick="resetSleep()" style="background:none;border:none;color:#374151;font-size:11px;cursor:pointer;margin-top:8px;display:block;width:100%;text-align:center">↺ Reinitialiser</button>'
   html+='</div>'
 
-  // POIDS
-  html+='<div class="card"><div class="lbl">Poids</div>'
-    +'<div style="display:flex;align-items:center;gap:10px">'
-    +'<input type="number" class="ninput" step="0.1" min="30" max="200" placeholder="Ex: 78.5" value="'+weight+'" oninput="weight=this.value"/>'
-    +'<span style="color:#64748b;font-size:14px">kg</span></div></div>'
+  // SIESTE
+  var sd=siesteDuree()
+  html+='<div class="card"><div class="lbl">Sieste</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div><div style="font-size:10px;color:#7c3aed;margin-bottom:3px">🕐 Debut</div>'
+    +'<input type="time" class="tinput" value="'+toTimeInput(sieste.debut)+'" onchange="setSieste(\'debut\',this.value)"/></div>'
+    +'<div><div style="font-size:10px;color:#22c55e;margin-bottom:3px">🕑 Fin</div>'
+    +'<input type="time" class="tinput" value="'+toTimeInput(sieste.fin)+'" onchange="setSieste(\'fin\',this.value)"/></div>'
+    +'</div>'
+    +(sd?'<div style="background:#0f0f1a;border-radius:8px;padding:8px;text-align:center;margin-top:8px;font-size:13px;color:#22c55e;font-weight:700">😴 Duree : '+sd+'</div>':'')
+    +(sd?'<button onclick="resetSieste()" style="background:none;border:none;color:#374151;font-size:11px;cursor:pointer;margin-top:6px;display:block;width:100%;text-align:center">↺ Effacer sieste</button>':'')
+    +'</div>'
+
+  // FATIGUE
+  html+='<div class="card"><div class="lbl">Fatigue</div>'
+  ;[{k:'phys',ic:'💪',n:'Physique'},{k:'ment',ic:'🧠',n:'Mentale'},{k:'emot',ic:'💙',n:'Emotionnelle'}].forEach(function(f){
+    html+='<div style="margin-bottom:12px"><div class="sublbl" style="margin-bottom:6px">'+f.ic+' '+f.n+'</div>'
+      +'<div style="display:flex;gap:4px">'
+    ;[0,1,2,3,4,5].forEach(function(v){
+      var cols=['#22c55e','#84cc16','#eab308','#f97316','#ef4444','#7c2d12']
+      var on=fatigue[f.k]===v
+      html+='<button onclick="setFatigue(\''+f.k+'\','+v+')" style="flex:1;padding:9px 0;border-radius:7px;border:2px solid '+(on?cols[v]:'#2d2d4e')+';background:'+(on?cols[v]+'33':'#0f0f1a')+';color:'+(on?'#fff':'#64748b')+';cursor:pointer;font-size:13px;font-weight:700">'+v+'</button>'
+    })
+    html+='</div>'
+      +(fatigue[f.k]!==null?'<div style="font-size:10px;color:#94a3b8;margin-top:4px">'+FATLBL[f.k][fatigue[f.k]]+'</div>':'')
+      +'</div>'
+  })
+  html+='<div class="sublbl" style="margin-bottom:6px">📋 Impact sur ma journee</div>'
+    +'<textarea id="ta_impact" placeholder="Ex: difficulte a me concentrer, j ai du annuler..." oninput="fatigue.impact=this.value" style="min-height:70px">'+fatigue.impact+'</textarea>'
+    +'<button onclick="doVoiceTo(\'fatigue.impact\')" style="margin-top:6px;width:100%;padding:9px;background:'+(listening==='fatigue.impact'?'#7f1d1d44':'#1e1b4b')+';border:1px solid '+(listening==='fatigue.impact'?'#ef4444':'#3730a3')+';border-radius:8px;color:'+(listening==='fatigue.impact'?'#ef4444':'#a78bfa')+';cursor:pointer;font-size:12px;font-weight:700">'+(listening==='fatigue.impact'?'🔴 Ecoute…':'🎙 Dicter')+'</button>'
+    +'</div>'
+
+  // ALIMENTATION
+  html+='<div class="card"><div class="lbl">Alimentation</div>'
+  ;[{k:'matin',ic:'🌅',n:'Petit-dejeuner'},{k:'midi',ic:'☀️',n:'Dejeuner'},{k:'soir',ic:'🌙',n:'Diner'},{k:'collation',ic:'🍎',n:'Collation'}].forEach(function(rp){
+    var lid='ta_'+rp.k
+    html+='<div style="margin-bottom:10px"><div class="sublbl" style="margin-bottom:6px">'+rp.ic+' '+rp.n+'</div>'
+      +'<textarea id="'+lid+'" placeholder="Decris ton '+rp.n.toLowerCase()+'..." oninput="repas.'+rp.k+'=this.value" style="min-height:60px">'+repas[rp.k]+'</textarea>'
+      +'<button onclick="doVoiceTo(\'repas.'+rp.k+'\')" style="margin-top:6px;width:100%;padding:8px;background:'+(listening==='repas.'+rp.k?'#7f1d1d44':'#1e1b4b')+';border:1px solid '+(listening==='repas.'+rp.k?'#ef4444':'#3730a3')+';border-radius:8px;color:'+(listening==='repas.'+rp.k?'#ef4444':'#a78bfa')+';cursor:pointer;font-size:12px;font-weight:700">'+(listening==='repas.'+rp.k?'🔴 Ecoute…':'🎙 Dicter')+'</button>'
+      +'</div>'
+  })
+  html+='<div class="sublbl" style="margin-bottom:6px;margin-top:4px">🔥 Calories (estimees par Claude)</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+    +'<input type="number" class="ninput" placeholder="Ex: 1850" value="'+calories+'" oninput="calories=this.value" style="font-size:16px"/>'
+    +'<span style="color:#64748b;font-size:14px">kcal</span></div>'
+    +'<input class="tinput" placeholder="Macros (ex: P 90g / G 200g / L 60g)" value="'+macros+'" oninput="macros=this.value" style="width:100%;padding:10px"/>'
+    +'<div style="font-size:10px;color:#64748b;margin-top:6px;line-height:1.5">💡 Dis-moi ce que tu as mange dans Claude, je te donne les calories et macros a recopier ici.</div>'
+    +'</div>'
+
+  // HYDRATATION
+  html+='<div class="card"><div class="lbl">Hydratation — '+eau+'/'+EAU_OBJ+' verres</div>'
+    +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
+  for(var iE=1;iE<=EAU_OBJ;iE++){
+    var onE=eau>=iE
+    html+='<button onclick="setEau('+iE+')" style="flex:1;min-width:34px;height:40px;border-radius:8px;border:2px solid '+(onE?'#22d3ee':'#2d2d4e')+';background:'+(onE?'#22d3ee22':'#0f0f1a')+';cursor:pointer;font-size:18px">💧</button>'
+  }
+  html+='</div>'
+    +(eau>0?'<div style="font-size:11px;color:'+(eau>=EAU_OBJ?'#22c55e':'#fb923c')+';margin-top:8px;text-align:center">'+(eau>=EAU_OBJ?'✅ Objectif atteint !':(EAU_OBJ-eau)+' verre'+(EAU_OBJ-eau>1?'s':'')+' restant'+(EAU_OBJ-eau>1?'s':''))+'</div>':'')
+    +'</div>'
+
+
+  // POIDS — uniquement le lundi (pesée hebdo à jeun)
+  if(new Date().getDay()===1){
+    html+='<div class="card"><div class="lbl">Poids — pesée hebdomadaire</div>'
+      +'<div style="font-size:11px;color:#fbbf24;margin-bottom:10px">⚖️ Lundi · à jeun, le matin</div>'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<input type="number" class="ninput" step="0.1" min="30" max="200" placeholder="Ex: 78.5" value="'+weight+'" oninput="weight=this.value"/>'
+      +'<span style="color:#64748b;font-size:14px">kg</span></div></div>'
+  }
 
   // MÉDICATION
   html+='<div class="card"><div class="lbl">Medication classique</div>'
