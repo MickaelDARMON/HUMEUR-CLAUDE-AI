@@ -429,6 +429,7 @@ async function doConfirm(){
     await saveCalendar(sum)
     saveStatus='Brouillon Gmail…';render()
     await saveDraft(sum)
+    clearLocal()
     step='done';render()
   }catch(e){saveStatus='Erreur: '+e.message;step='result';render()}
 }
@@ -508,6 +509,7 @@ function buildChart(){
 function render(){
   var app=document.getElementById('app')
   if(!app)return
+  if(token&&step==='form')saveLocal()
   var today=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
   var sum=getSleep()
   var SCORES=[4,3,2,1,0,-1,-2,-3,-4]
@@ -750,12 +752,98 @@ function render(){
     +'<textarea id="ta" placeholder="Decris librement : ton humeur, ton energie, ce que tu as vecu…" oninput="comment=this.value">'+comment+'</textarea>'
     +'<button onclick="doVoice()" style="margin-top:8px;width:100%;padding:10px;background:'+(listening?'#7f1d1d44':'#1e1b4b')+';border:1px solid '+(listening?'#ef4444':'#3730a3')+';border-radius:8px;color:'+(listening?'#ef4444':'#a78bfa')+';cursor:pointer;font-size:13px;font-weight:700">'+(listening?'🔴 Ecoute…':'🎙 Dicter (vocal)')+'</button></div>'
 
+  html+='<button onclick="copierJournee()" style="width:100%;padding:13px;background:#0f0f1a;border:1px solid #3d3d6b;border-radius:10px;color:#94a3b8;font-size:13px;font-weight:700;cursor:pointer;margin-top:4px;margin-bottom:8px">📋 Copier ma journee (pour Notes)</button>'
+
   html+='<button onclick="doAnalyze()" style="width:100%;padding:18px;background:linear-gradient(135deg,#7c3aed,#a78bfa);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;cursor:pointer;margin-top:4px">Analyser →</button>'
 
   app.innerHTML=html
 }
 
-window.addEventListener('DOMContentLoaded',render)
+// ── SAUVEGARDE AUTO SUR L'IPAD ───────────────────────────────────
+var SAVE_KEY='hscm_jour_en_cours'
+function saveLocal(){
+  try{
+    var c=cycles.map(function(x){return{bed:x.bed?x.bed.toISOString():null,sleep:x.sleep?x.sleep.toISOString():null,wake:x.wake?x.wake.toISOString():null}})
+    var s={debut:sieste.debut?sieste.debut.toISOString():null,fin:sieste.fin?sieste.fin.toISOString():null}
+    var data={
+      date:new Date().toISOString().split('T')[0],
+      cycles:c,sieste:s,fatigue:fatigue,repas:repas,calories:calories,macros:macros,
+      eau:eau,moments:moments,med:med,medSOS:medSOS,comment:comment,weight:weight
+    }
+    localStorage.setItem(SAVE_KEY,JSON.stringify(data))
+  }catch(e){}
+}
+function loadLocal(){
+  try{
+    var raw=localStorage.getItem(SAVE_KEY)
+    if(!raw)return false
+    var data=JSON.parse(raw)
+    // Ne recharge que si c'est la meme journee (sinon nouvelle journee = repart a zero)
+    var today=new Date().toISOString().split('T')[0]
+    if(data.date!==today)return false
+    if(data.cycles)cycles=data.cycles.map(function(x){return{bed:x.bed?new Date(x.bed):null,sleep:x.sleep?new Date(x.sleep):null,wake:x.wake?new Date(x.wake):null}})
+    if(data.sieste)sieste={debut:data.sieste.debut?new Date(data.sieste.debut):null,fin:data.sieste.fin?new Date(data.sieste.fin):null}
+    if(data.fatigue)fatigue=data.fatigue
+    if(data.repas)repas=data.repas
+    if(data.calories!==undefined)calories=data.calories
+    if(data.macros!==undefined)macros=data.macros
+    if(data.eau!==undefined)eau=data.eau
+    if(data.moments)moments=data.moments
+    if(data.med!==undefined)med=data.med
+    if(data.medSOS!==undefined)medSOS=data.medSOS
+    if(data.comment!==undefined)comment=data.comment
+    if(data.weight!==undefined)weight=data.weight
+    return true
+  }catch(e){return false}
+}
+function clearLocal(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
+
+// ── COPIER LA JOURNEE (pour coller dans Notes) ───────────────────
+function copierJournee(){
+  var sum=getSleep()
+  var d=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
+  var L=['JOURNAL HSCM — '+d,'']
+  if(moments.length){L.push('HUMEUR AU FIL DE LA JOURNEE :');moments.forEach(function(m){L.push('  '+m.heure+' '+m.emoji+' ('+(m.val>0?'+':'')+m.val+')')});var avg=momentsAverage();L.push('  → Moyenne : '+(avg>0?'+':'')+avg+' ('+scoreLabel(avg)+')');L.push('')}
+  L.push('SOMMEIL :')
+  L.push('  Couche : '+sum.bedtime+' | Leve : '+sum.wakeup)
+  L.push('  Total : '+(sum.totalSleep||'?')+' ('+sum.cycleCount+' cycle'+(sum.cycleCount>1?'s':'')+')')
+  var sd=siesteDuree()
+  L.push('  Sieste : '+(sd?toTimeInput(sieste.debut)+'-'+toTimeInput(sieste.fin)+' ('+sd+')':'Aucune'))
+  L.push('')
+  if(fatigue.phys!==null||fatigue.ment!==null||fatigue.emot!==null){
+    L.push('FATIGUE :')
+    if(fatigue.phys!==null)L.push('  Physique : '+fatigue.phys+'/5 ('+FATLBL.phys[fatigue.phys]+')')
+    if(fatigue.ment!==null)L.push('  Mentale : '+fatigue.ment+'/5 ('+FATLBL.ment[fatigue.ment]+')')
+    if(fatigue.emot!==null)L.push('  Emotionnelle : '+fatigue.emot+'/5 ('+FATLBL.emot[fatigue.emot]+')')
+    if(fatigue.impact)L.push('  Impact : '+fatigue.impact)
+    L.push('')
+  }
+  if(repas.matin||repas.midi||repas.soir||repas.collation){
+    L.push('ALIMENTATION :')
+    if(repas.matin)L.push('  Petit-dej : '+repas.matin)
+    if(repas.midi)L.push('  Dejeuner : '+repas.midi)
+    if(repas.soir)L.push('  Diner : '+repas.soir)
+    if(repas.collation)L.push('  Collation : '+repas.collation)
+    if(calories)L.push('  Calories : '+calories+' kcal'+(macros?' ('+macros+')':''))
+    L.push('')
+  }
+  L.push('Hydratation : '+eau+'/'+EAU_OBJ+' verres')
+  L.push('Medication : '+(med===true?'Prise':med===false?'Omise':'?')+(medSOS?' | SOS: '+medSOS:''))
+  if(weight)L.push('Poids : '+weight+' kg')
+  if(comment)L.push('','COMMENTAIRE :','  '+comment)
+  var txt=L.join('\n')
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){alert('✅ Journee copiee ! Ouvre Notes et colle (appui long → Coller).')}).catch(function(){promptCopy(txt)})
+  }else{promptCopy(txt)}
+}
+function promptCopy(txt){
+  // Fallback : selection manuelle
+  var ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select()
+  try{document.execCommand('copy');alert('✅ Journee copiee ! Colle-la dans Notes.')}catch(e){alert('Copie manuelle :\n\n'+txt)}
+  document.body.removeChild(ta)
+}
+
+window.addEventListener('DOMContentLoaded',function(){loadLocal();render()})
 </script>
 </body>
 </html>
