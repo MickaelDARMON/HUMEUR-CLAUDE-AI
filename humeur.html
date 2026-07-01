@@ -510,7 +510,11 @@ function render(){
   var app=document.getElementById('app')
   if(!app)return
   if(token&&step==='form')saveLocal()
-  var today=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
+  var todayDate=new Date()
+  var yesterdayDate=new Date(todayDate); yesterdayDate.setDate(todayDate.getDate()-1)
+  var todayFmt=todayDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})
+  var yestFmt=yesterdayDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})
+  var today=todayDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})
   var sum=getSleep()
   var SCORES=[4,3,2,1,0,-1,-2,-3,-4]
   var html=''
@@ -600,7 +604,7 @@ function render(){
   }
 
   // HUMEUR DU MOMENT (emojis horaires)
-  html+='<div class="card"><div class="lbl">Humeur du moment</div>'
+  html+='<div class="card"><div class="lbl">🎭 Humeur du jour</div><div style="font-size:11px;color:#7c3aed;margin-bottom:8px">'+todayFmt+'</div>'
     +'<div style="font-size:11px;color:#64748b;margin-bottom:10px">Note ton humeur quand tu veux dans la journee. Le score HSCM du jour = moyenne.</div>'
     +'<div style="display:flex;gap:5px;margin-bottom:10px">'
   EMOJIS.forEach(function(em,i){
@@ -633,8 +637,7 @@ function render(){
 
 
   // SOMMEIL
-  html+='<div class="card"><div class="lbl">Sommeil</div>'
-    +'<div class="sublbl" style="margin-top:4px">Saisie manuelle</div>'
+  html+='<div class="card"><div class="lbl">🌙 Sommeil — nuit dernière</div><div style="font-size:11px;color:#4b5563;margin-bottom:8px">'+yestFmt+' → '+todayFmt+'</div>'
 
   cycles.forEach(function(c,i){
     html+='<div style="background:#0f0f1a;border-radius:10px;padding:10px;margin-bottom:8px">'
@@ -735,7 +738,7 @@ function render(){
   }
 
   // MÉDICATION
-  html+='<div class="card"><div class="lbl">Medication classique</div>'
+  html+='<div class="card"><div class="lbl">💊 Médication d\'hier soir</div><div style="font-size:11px;color:#4b5563;margin-bottom:8px">'+yestFmt+'</div>'
     +'<div style="display:flex;gap:10px;margin-bottom:14px">'
     +'<button onclick="med=true;render()" style="flex:1;padding:14px;border-radius:10px;border:2px solid '+(med===true?'#22c55e':'#2d2d4e')+';background:'+(med===true?'#05301444':'#0f0f1a')+';color:'+(med===true?'#22c55e':'#64748b')+';cursor:pointer;font-size:14px;font-weight:700">✅ Prise</button>'
     +'<button onclick="med=false;render()" style="flex:1;padding:14px;border-radius:10px;border:2px solid '+(med===false?'#ef4444':'#2d2d4e')+';background:'+(med===false?'#7f1d1d44':'#0f0f1a')+';color:'+(med===false?'#ef4444':'#64748b')+';cursor:pointer;font-size:14px;font-weight:700">❌ Omise</button>'
