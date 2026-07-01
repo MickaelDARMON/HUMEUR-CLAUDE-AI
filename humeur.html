@@ -223,14 +223,24 @@ function loadChart(){
   .then(function(r){return r.json()})
   .then(function(d){
     if(!d.items){chartData=[];render();return}
-    chartData=d.items.map(function(ev){
+    // Dédupliquer : garder l'événement avec la description la plus longue par date
+    var evByDate={}
+    d.items.forEach(function(ev){
+      var dt=new Date(ev.start.date||ev.start.dateTime)
+      var key=String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0')
+      var desc=(ev.description||'')
+      if(!evByDate[key]||desc.length>(evByDate[key].description||'').length) evByDate[key]=ev
+    })
+    chartData=Object.values(evByDate).sort(function(a,b){
+      return new Date(a.start.date||a.start.dateTime)-new Date(b.start.date||b.start.dateTime)
+    }).map(function(ev){
       var desc=ev.description||''
-      var sm=desc.match(/HSCM\s*:\s*([+-]?\d)/),slm=desc.match(/Total\s*:\s*([\dh]+)/),wm=desc.match(/Poids\s*:\s*([\d.]+)/)
+      var sm=desc.match(/HSCM(?:\s+Score)?\s*:\s*([+-]?\d)/),slm=desc.match(/Total(?:\s+dormi)?\s*:\s*(~?[\dh]+)/),wm=desc.match(/Poids\s*:\s*([\d.]+)/)
       var fp=desc.match(/Fatigue physique\s*:\s*(\d)/),fm=desc.match(/Fatigue mentale\s*:\s*(\d)/),fe=desc.match(/Fatigue emotionnelle\s*:\s*(\d)/)
       var em=desc.match(/Eau\s*:\s*(\d+)/),km=desc.match(/Calories\s*:\s*(\d+)/)
       // sommeil en heures décimales pour graphique
       var slh=null
-      if(slm){var hm=slm[1].match(/(\d+)h(\d*)/);if(hm)slh=parseInt(hm[1])+(hm[2]?parseInt(hm[2])/60:0)}
+      if(slm){var hm=slm[1].match(/(\d+)h(\d*)/);if(hm)slh=Math.round((parseInt(hm[1])+(hm[2]?parseInt(hm[2])/60:0))*10)/10}
       var dt=new Date(ev.start&&ev.start.date?ev.start.date:(ev.start.dateTime||'').split('T')[0])
       return{date:String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0'),score:sm?parseInt(sm[1]):0,sleep:slm?slm[1]:null,sleepH:slh,weight:wm?parseFloat(wm[1]):null,fp:fp?parseInt(fp[1]):null,fm:fm?parseInt(fm[1]):null,fe:fe?parseInt(fe[1]):null,eau:em?parseInt(em[1]):null,kcal:km?parseInt(km[1]):null,id:ev.id}
     })
